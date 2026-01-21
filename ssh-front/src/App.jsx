@@ -54,7 +54,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-blue-500/30">
+    <div className="h-screen overflow-hidden bg-slate-900 text-slate-200 font-sans selection:bg-blue-500/30 flex flex-col">
       <Toaster 
         position="top-right" 
         toastOptions={{
@@ -78,8 +78,8 @@ export default function App() {
         onSessionClick={() => setSessionModalOpen(true)}
       />
 
-      <main className="max-w-6xl mx-auto p-4 md:p-6 flex flex-col gap-6 min-h-[calc(100vh-64px)]">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
+      <main className="mx-auto w-full lg:w-[85vw] max-w-[1700px] p-4 md:p-6 flex-1 min-h-0 overflow-hidden flex flex-col gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0 overflow-hidden">
           {/* Left: File manager */}
           <div className="lg:col-span-3 min-h-0">
             <FileExplorer
@@ -94,7 +94,7 @@ export default function App() {
           </div>
 
           {/* Center: Task + Command + Terminal */}
-          <div className="lg:col-span-7 flex flex-col gap-6 min-h-0">
+          <div className="lg:col-span-6 flex flex-col gap-6 min-h-0">
             <div className="h-[260px] min-h-0">
               <TaskWindow
                 group={activeGroup}
@@ -117,7 +117,7 @@ export default function App() {
               cwd={cwd}
             />
 
-            <div className="flex-1 min-h-[360px]">
+            <div className="flex-1 min-h-0">
               <TerminalPanel
                 output={output}
                 className="h-full"
@@ -131,7 +131,7 @@ export default function App() {
           </div>
 
           {/* Right: Task Groups */}
-          <div className="lg:col-span-2 min-h-0">
+          <div className="lg:col-span-3 min-h-0">
             <TaskPanel activeGroupId={activeGroupId} onSelectGroup={setActiveGroupId} />
           </div>
         </div>
