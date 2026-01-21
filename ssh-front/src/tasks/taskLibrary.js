@@ -1,0 +1,236 @@
+import {
+  Activity,
+  Boxes,
+  Database,
+  FileText,
+  Flame,
+  Globe,
+  HardDrive,
+  KeyRound,
+  Layers,
+  Network,
+  Package,
+  Shield,
+  TerminalSquare,
+  User,
+  Wrench,
+} from "lucide-react";
+
+export const TASK_GROUPS = [
+  {
+    id: "system-info",
+    title: "System Info",
+    icon: Activity,
+    description: "Quick system identification and baseline checks.",
+    tasks: [
+      { id: "os-release", title: "Detect OS", tags: ["system", "info"], command: "cat /etc/os-release || uname -a" },
+      { id: "uname", title: "Kernel & Arch", tags: ["system", "info"], command: "uname -a" },
+      { id: "uptime", title: "Uptime & Load", tags: ["system", "info"], command: "uptime" },
+      { id: "cpu", title: "CPU Info", tags: ["system", "info"], command: "lscpu || cat /proc/cpuinfo | head" },
+      { id: "mem", title: "Memory Usage", tags: ["system", "info"], command: "free -h || vm_stat" },
+      { id: "top", title: "Top Processes", tags: ["system", "process"], command: "ps aux --sort=-%mem | head -n 20" },
+      { id: "env", title: "Env Vars (preview)", tags: ["system", "debug"], command: "env | sort | sed -n '1,80p'" },
+    ],
+  },
+  {
+    id: "packages",
+    title: "Packages",
+    icon: Package,
+    description: "APT/YUM package management shortcuts.",
+    tasks: [
+      { id: "apt-update", title: "APT Update", tags: ["apt", "install"], command: "sudo apt-get update" },
+      { id: "apt-upgrade", title: "APT Upgrade", tags: ["apt", "install"], command: "sudo apt-get upgrade -y" },
+      { id: "apt-fix", title: "Fix Broken Packages", tags: ["apt", "repair"], command: "sudo apt-get -f install -y" },
+      { id: "pkg-search", title: "Search Package (APT)", tags: ["apt", "info"], command: "apt-cache search nginx | head -n 30" },
+      { id: "pkg-installed", title: "List Installed (APT)", tags: ["apt", "info"], command: "dpkg -l | sed -n '1,60p'" },
+      { id: "yum-info", title: "YUM/DNF Info", tags: ["yum", "info"], command: "command -v dnf && dnf --version || yum --version || true" },
+    ],
+  },
+  {
+    id: "users-ssh",
+    title: "Users & SSH",
+    icon: User,
+    description: "User checks and SSH daemon basics.",
+    tasks: [
+      { id: "whoami", title: "Who am I", tags: ["user", "info"], command: "whoami && id" },
+      { id: "users", title: "Logged-in Users", tags: ["user", "info"], command: "who || w" },
+      { id: "sudo-check", title: "Sudo Privileges", tags: ["user", "security"], command: "sudo -n true && echo 'sudo: yes' || echo 'sudo: no'" },
+      { id: "ssh-status", title: "SSH Service Status", tags: ["ssh", "service"], command: "sudo systemctl status ssh --no-pager || sudo service ssh status || true" },
+      { id: "ssh-config", title: "Show sshd_config (key lines)", tags: ["ssh", "config"], command: "sudo grep -E '^(Port|PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|AllowUsers|AllowGroups)' /etc/ssh/sshd_config || true" },
+      { id: "auth-log", title: "Auth Log (tail)", tags: ["ssh", "logs"], command: "sudo tail -n 80 /var/log/auth.log 2>/dev/null || sudo journalctl -u ssh -n 80 --no-pager || true" },
+    ],
+  },
+  {
+    id: "network",
+    title: "Networking",
+    icon: Network,
+    description: "IPs, routes, DNS, and ports.",
+    tasks: [
+      { id: "ip-a", title: "IP Addresses", tags: ["network", "info"], command: "ip a || ifconfig" },
+      { id: "routes", title: "Routes", tags: ["network", "info"], command: "ip route || netstat -rn" },
+      { id: "dns", title: "DNS Resolver", tags: ["network", "info"], command: "cat /etc/resolv.conf || true" },
+      { id: "ping", title: "Ping 1.1.1.1", tags: ["network", "debug"], command: "ping -c 4 1.1.1.1 || true" },
+      { id: "curl-ip", title: "Public IP", tags: ["network", "info"], command: "curl -s ifconfig.me || curl -s https://api.ipify.org || true" },
+      { id: "listening", title: "Listening Ports", tags: ["network", "info"], command: "sudo ss -tulpn || sudo netstat -tulpn || true" },
+      { id: "firewall", title: "UFW Status", tags: ["security", "firewall"], command: "sudo ufw status verbose || true" },
+    ],
+  },
+  {
+    id: "disk-fs",
+    title: "Disk & Filesystem",
+    icon: HardDrive,
+    description: "Disk space, mounts, and large files.",
+    tasks: [
+      { id: "df", title: "Disk Usage (df)", tags: ["disk", "info"], command: "df -hT" },
+      { id: "du", title: "Directory Size (cwd)", tags: ["disk", "info"], command: "du -sh ./* 2>/dev/null | sort -hr | head -n 20" },
+      { id: "mounts", title: "Mounts", tags: ["disk", "info"], command: "mount | sed -n '1,60p'" },
+      { id: "inode", title: "Inode Usage", tags: ["disk", "info"], command: "df -ih" },
+      { id: "largest", title: "Largest Files (cwd)", tags: ["disk", "cleanup"], command: "find . -maxdepth 3 -type f -printf '%s %p\\n' 2>/dev/null | sort -nr | head -n 20" },
+    ],
+  },
+  {
+    id: "services",
+    title: "Services",
+    icon: Wrench,
+    description: "Systemd/service basics.",
+    tasks: [
+      { id: "systemctl-failed", title: "Failed Units", tags: ["systemd", "debug"], command: "sudo systemctl --failed --no-pager || true" },
+      { id: "systemctl-list", title: "Running Services", tags: ["systemd", "info"], command: "sudo systemctl list-units --type=service --state=running --no-pager | sed -n '1,80p'" },
+      { id: "journal", title: "Journal Tail", tags: ["logs", "debug"], command: "sudo journalctl -n 120 --no-pager || true" },
+      { id: "dmesg", title: "dmesg (tail)", tags: ["kernel", "debug"], command: "sudo dmesg | tail -n 120 || true" },
+    ],
+  },
+  {
+    id: "nodejs",
+    title: "Node.js",
+    icon: TerminalSquare,
+    description: "Install/check Node, npm, and common process managers.",
+    tasks: [
+      {
+        id: "node-install-20",
+        title: "Install Node.js 20 (Ubuntu/Debian)",
+        tags: ["node", "install"],
+        command:
+          "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs",
+      },
+      { id: "node-version", title: "Node & npm version", tags: ["node", "info"], command: "node -v && npm -v" },
+      { id: "corepack", title: "Enable Corepack", tags: ["node", "tools"], command: "sudo corepack enable || corepack enable" },
+      { id: "pnpm", title: "Install pnpm (corepack)", tags: ["node", "tools"], command: "corepack prepare pnpm@latest --activate" },
+      { id: "pm2-install", title: "Install PM2", tags: ["node", "pm2"], command: "sudo npm i -g pm2" },
+      { id: "pm2-list", title: "PM2 List", tags: ["node", "pm2"], command: "pm2 ls || true" },
+      { id: "pm2-logs", title: "PM2 Logs (last 100)", tags: ["node", "pm2"], command: "pm2 logs --lines 100 || true" },
+    ],
+  },
+  {
+    id: "docker",
+    title: "Docker",
+    icon: Boxes,
+    description: "Common Docker and Compose actions.",
+    tasks: [
+      { id: "docker-version", title: "Docker Version", tags: ["docker", "info"], command: "docker version || true" },
+      { id: "docker-ps", title: "List Containers", tags: ["docker", "info"], command: "docker ps -a" },
+      { id: "docker-images", title: "List Images", tags: ["docker", "info"], command: "docker images" },
+      { id: "docker-stats", title: "Container Stats", tags: ["docker", "info"], command: "docker stats --no-stream || true" },
+      { id: "compose-ps", title: "Compose: ps", tags: ["docker", "compose"], command: "docker compose ps || docker-compose ps || true" },
+      { id: "compose-logs", title: "Compose: logs (tail)", tags: ["docker", "compose"], command: "docker compose logs --tail 200 || docker-compose logs --tail 200 || true" },
+      { id: "compose-restart", title: "Compose: restart", tags: ["docker", "compose"], command: "docker compose restart || docker-compose restart || true" },
+    ],
+  },
+  {
+    id: "nginx",
+    title: "Nginx",
+    icon: Globe,
+    description: "Install and troubleshoot Nginx.",
+    tasks: [
+      { id: "nginx-install", title: "Install Nginx", tags: ["nginx", "install"], command: "sudo apt-get update && sudo apt-get install -y nginx" },
+      { id: "nginx-status", title: "Nginx Status", tags: ["nginx", "service"], command: "sudo systemctl status nginx --no-pager || true" },
+      { id: "nginx-test", title: "Test Config", tags: ["nginx", "config"], command: "sudo nginx -t || true" },
+      { id: "nginx-sites", title: "List Sites Enabled", tags: ["nginx", "config"], command: "ls -la /etc/nginx/sites-enabled || true" },
+      { id: "nginx-reload", title: "Reload Nginx", tags: ["nginx", "service"], command: "sudo systemctl reload nginx || true" },
+      { id: "nginx-logs", title: "Access/Error Logs (tail)", tags: ["nginx", "logs"], command: "sudo tail -n 120 /var/log/nginx/access.log /var/log/nginx/error.log 2>/dev/null || true" },
+    ],
+  },
+  {
+    id: "databases",
+    title: "Databases",
+    icon: Database,
+    description: "Postgres/MySQL quick checks.",
+    tasks: [
+      { id: "postgres-status", title: "Postgres Status", tags: ["postgres", "service"], command: "sudo systemctl status postgresql --no-pager || true" },
+      { id: "postgres-conn", title: "Postgres: psql connect (local)", tags: ["postgres", "cli"], command: "psql -U postgres -c 'SELECT version();' || true" },
+      { id: "mysql-status", title: "MySQL Status", tags: ["mysql", "service"], command: "sudo systemctl status mysql --no-pager || true" },
+      { id: "mysql-version", title: "MySQL: version", tags: ["mysql", "cli"], command: "mysql --version || true" },
+    ],
+  },
+  {
+    id: "security",
+    title: "Security",
+    icon: Shield,
+    description: "Basic security checks (read-only).",
+    tasks: [
+      { id: "ufw", title: "UFW Status", tags: ["security", "firewall"], command: "sudo ufw status verbose || true" },
+      { id: "fail2ban", title: "Fail2ban Status", tags: ["security", "fail2ban"], command: "sudo fail2ban-client status || true" },
+      { id: "sudoers", title: "Sudoers (who can sudo)", tags: ["security", "sudo"], command: "getent group sudo || getent group wheel || true" },
+      { id: "lastlog", title: "Recent Logins", tags: ["security", "auth"], command: "last -n 30 || true" },
+      { id: "ssh-keys", title: "Authorized Keys (current user)", tags: ["security", "ssh"], command: "ls -la ~/.ssh && sed -n '1,120p' ~/.ssh/authorized_keys 2>/dev/null || true" },
+    ],
+  },
+  {
+    id: "logs",
+    title: "Logs",
+    icon: FileText,
+    description: "Quick log tails for common services.",
+    tasks: [
+      { id: "syslog", title: "syslog (tail)", tags: ["logs"], command: "sudo tail -n 200 /var/log/syslog 2>/dev/null || true" },
+      { id: "messages", title: "messages (tail)", tags: ["logs"], command: "sudo tail -n 200 /var/log/messages 2>/dev/null || true" },
+      { id: "journal-nginx", title: "journalctl nginx", tags: ["logs", "nginx"], command: "sudo journalctl -u nginx -n 200 --no-pager || true" },
+      { id: "journal-docker", title: "journalctl docker", tags: ["logs", "docker"], command: "sudo journalctl -u docker -n 200 --no-pager || true" },
+    ],
+  },
+  {
+    id: "git",
+    title: "Git",
+    icon: Layers,
+    description: "Common git operations (read-only / safe).",
+    tasks: [
+      { id: "git-version", title: "Git Version", tags: ["git", "info"], command: "git --version || true" },
+      { id: "git-status", title: "git status", tags: ["git", "repo"], command: "git status || true" },
+      { id: "git-branches", title: "Branches", tags: ["git", "repo"], command: "git branch -av || true" },
+      { id: "git-log", title: "Recent Commits", tags: ["git", "repo"], command: "git --no-pager log --oneline -n 20 || true" },
+      { id: "git-remote", title: "Remotes", tags: ["git", "repo"], command: "git remote -v || true" },
+    ],
+  },
+  {
+    id: "performance",
+    title: "Performance",
+    icon: Flame,
+    description: "Quick performance triage commands.",
+    tasks: [
+      { id: "top-cpu", title: "Top CPU", tags: ["perf"], command: "ps aux --sort=-%cpu | head -n 20" },
+      { id: "top-mem", title: "Top Memory", tags: ["perf"], command: "ps aux --sort=-%mem | head -n 20" },
+      { id: "iostat", title: "IOStat (if available)", tags: ["perf", "disk"], command: "iostat -xz 1 3 || true" },
+      { id: "vmstat", title: "vmstat", tags: ["perf"], command: "vmstat 1 5 || true" },
+      { id: "netstat", title: "Connections (summary)", tags: ["perf", "network"], command: "ss -s || netstat -s || true" },
+    ],
+  },
+  {
+    id: "keys-ssl",
+    title: "Keys & TLS",
+    icon: KeyRound,
+    description: "TLS and key checks (read-only).",
+    tasks: [
+      { id: "openssl-version", title: "OpenSSL Version", tags: ["tls", "info"], command: "openssl version -a || true" },
+      { id: "cert-expiry", title: "Cert Expiry (domain)", tags: ["tls", "debug"], command: "echo | openssl s_client -servername example.com -connect example.com:443 2>/dev/null | openssl x509 -noout -dates || true" },
+      { id: "letsencrypt", title: "Certbot Certificates", tags: ["tls", "letsencrypt"], command: "sudo certbot certificates 2>/dev/null || true" },
+    ],
+  },
+];
+
+export function getDefaultGroupId() {
+  return TASK_GROUPS[0]?.id || "system-info";
+}
+
+export function findGroupById(id) {
+  return TASK_GROUPS.find((g) => g.id === id) || null;
+}
+

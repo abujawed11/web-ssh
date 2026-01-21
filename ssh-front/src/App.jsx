@@ -6,10 +6,13 @@ import FileExplorer from "./components/FileExplorer";
 import ConnectPanel from "./components/ConnectPanel";
 import ConnectedCard from "./components/ConnectedCard";
 import TaskPanel from "./components/TaskPanel";
+import TaskWindow from "./components/TaskWindow";
 import CommandPanel from "./components/CommandPanel";
 import TerminalPanel from "./components/TerminalPanel";
 import KIModal from "./components/KIModal";
+import SessionModal from "./components/SessionModal";
 import { useSSH } from "./hooks/useSSH";
+import { findGroupById, getDefaultGroupId } from "./tasks/taskLibrary";
 
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -37,6 +40,10 @@ export default function App() {
   } = useSSH();
 
   const [selectedCmd, setSelectedCmd] = useState("");
+  const [sessionModalOpen, setSessionModalOpen] = useState(false);
+  const [activeGroupId, setActiveGroupId] = useState(getDefaultGroupId);
+
+  const activeGroup = findGroupById(activeGroupId);
 
   if (!user) {
     return (
@@ -65,14 +72,16 @@ export default function App() {
           localStorage.removeItem("user");
           localStorage.removeItem("token");
           window.location.reload();
-        }} 
+        }}
+        session={connectionState}
+        cwd={cwd}
+        onSessionClick={() => setSessionModalOpen(true)}
       />
 
-      <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
-        {/* Top Section: Connection & Tasks */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-[500px]">
-          {/* Left Column: File Explorer */}
-          <div className="md:col-span-4 h-full min-h-0">
+      <main className="max-w-6xl mx-auto p-4 md:p-6 flex flex-col gap-6 min-h-[calc(100vh-64px)]">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
+          {/* Left: File manager */}
+          <div className="lg:col-span-3 min-h-0">
             <FileExplorer
               connected={!!connectionState}
               cwd={cwd}
@@ -84,52 +93,74 @@ export default function App() {
             />
           </div>
 
-          {/* Middle Column: Connection Manager */}
-          <div className="md:col-span-4 h-full min-h-0">
-            {connectionState ? (
-              <ConnectedCard 
-                connection={connectionState} 
-                onDisconnect={disconnectSSH} 
+          {/* Center: Task + Command + Terminal */}
+          <div className="lg:col-span-7 flex flex-col gap-6 min-h-0">
+            <div className="h-[260px] min-h-0">
+              <TaskWindow
+                group={activeGroup}
+                connected={!!connectionState}
+                onSelectCommand={setSelectedCmd}
+                onRunCommand={(cmd) => {
+                  setSelectedCmd(cmd);
+                  runCommand(cmd);
+                }}
               />
-            ) : (
-              <ConnectPanel 
-                onConnect={connectSSH} 
-                wsStatus={wsStatus} 
+            </div>
+
+            <CommandPanel
+              selectedCmd={selectedCmd}
+              onCmdChange={setSelectedCmd}
+              onRun={() => runCommand(selectedCmd)}
+              onClear={clearOutput}
+              isConnected={!!connectionState}
+              isRunning={running}
+              cwd={cwd}
+            />
+
+            <div className="flex-1 min-h-[360px]">
+              <TerminalPanel
+                output={output}
+                className="h-full"
+                title={
+                  connectionState
+                    ? `${connectionState.username || "user"}@${connectionState.hostName || connectionState.host} — ${cwd || "/"}`
+                    : "Not connected"
+                }
               />
-            )}
+            </div>
           </div>
 
-          {/* Right Column: Task Library */}
-          <div className="md:col-span-4 h-full min-h-0">
-            <TaskPanel onSelectCommand={setSelectedCmd} />
+          {/* Right: Task Groups */}
+          <div className="lg:col-span-2 min-h-0">
+            <TaskPanel activeGroupId={activeGroupId} onSelectGroup={setActiveGroupId} />
           </div>
-        </div>
-
-        {/* Bottom Section: Command & Terminal */}
-        <div className="space-y-6">
-          <CommandPanel
-            selectedCmd={selectedCmd}
-            onCmdChange={setSelectedCmd}
-            onRun={() => runCommand(selectedCmd)}
-            onClear={clearOutput}
-            isConnected={!!connectionState}
-            isRunning={running}
-            cwd={cwd}
-          />
-          
-          <TerminalPanel
-            output={output}
-            title={
-              connectionState
-                ? `${connectionState.username || "user"}@${connectionState.hostName || connectionState.host} — ${cwd || "/"}`
-                : "Not connected"
-            }
-          />
         </div>
       </main>
 
       {/* Modals */}
       {kiPrompt && <KIModal prompt={kiPrompt} onSubmit={answerKI} />}
+
+      <SessionModal
+        open={sessionModalOpen}
+        onClose={() => setSessionModalOpen(false)}
+        title={connectionState ? "Session information" : "New connection"}
+      >
+        {connectionState ? (
+          <div className="h-[520px] min-h-0">
+            <ConnectedCard connection={connectionState} onDisconnect={disconnectSSH} />
+          </div>
+        ) : (
+          <div className="h-[520px] min-h-0">
+            <ConnectPanel
+              onConnect={(payload) => {
+                setSessionModalOpen(false);
+                connectSSH(payload);
+              }}
+              wsStatus={wsStatus}
+            />
+          </div>
+        )}
+      </SessionModal>
     </div>
   );
 }

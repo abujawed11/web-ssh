@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 
-export default function TerminalPanel({ output, title }) {
+export default function TerminalPanel({ output, title, className }) {
   const outputRef = useRef(null);
   const [copied, setCopied] = useState(false);
 
@@ -19,7 +19,12 @@ export default function TerminalPanel({ output, title }) {
   };
 
   return (
-    <div className="bg-black rounded-xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col h-[400px]">
+    <div
+      className={
+        "bg-black rounded-xl border border-slate-700 shadow-2xl overflow-hidden flex flex-col min-h-0 " +
+        (className || "h-[400px]")
+      }
+    >
       <div className="p-2 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
         <div className="flex gap-1.5 px-2">
           <div className="w-2.5 h-2.5 rounded-full bg-red-500/50" />

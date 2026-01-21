@@ -54,10 +54,10 @@ export default function ConnectPanel({ onConnect, wsStatus }) {
           <Server className="w-4 h-4 text-blue-400" />
           New Connection
         </h3>
-        {wsStatus !== 'connected' && (
+        {wsStatus !== "connected" && (
           <span className="text-xs text-amber-500 flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-            Connecting to Service...
+            Connecting to service...
           </span>
         )}
       </div>
