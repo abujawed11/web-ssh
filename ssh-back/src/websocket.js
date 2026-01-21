@@ -78,7 +78,10 @@ function setupWebSocket(server) {
           activeConnections.set(sessionId, conn);
           ws.sessions.add(sessionId);
           
-          ws.send(JSON.stringify({ type: "connected", payload: { sessionId } }));
+          ws.send(JSON.stringify({ 
+            type: "connected", 
+            payload: { sessionId, host, port, username, authType } 
+          }));
           logger.info(`SSH Session created: ${sessionId}`, { userId: ws.userId, host });
         });
 
@@ -100,8 +103,20 @@ function setupWebSocket(server) {
         const { sessionId } = msg.payload;
         try {
           const conn = await getOrConnectSSH(sessionId, ws);
+          const session = await getSession(sessionId);
           ws.sessions.add(sessionId);
-          ws.send(JSON.stringify({ type: "status", status: "connected", sessionId }));
+          
+          ws.send(JSON.stringify({ 
+            type: "status", 
+            status: "connected", 
+            sessionId,
+            connection: session ? {
+              host: session.host,
+              port: session.port,
+              username: session.username,
+              authType: session.authType
+            } : null
+          }));
         } catch (err) {
           ws.send(JSON.stringify({ type: "error", message: err.message }));
         }

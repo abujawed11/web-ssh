@@ -1,1 +1,25 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-900 text-slate-200;
+  }
+}
+
+/* Custom Scrollbar for Terminal */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #111827; 
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #374151; 
+  border-radius: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #4b5563; 
+}

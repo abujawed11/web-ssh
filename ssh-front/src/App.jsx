@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
-import "./App.css";
-import { useSSH } from "./hooks/useSSH";
-import ConnectionForm from "./components/ConnectionForm";
-import TaskSearch from "./components/TaskSearch";
-import CommandExecutor from "./components/CommandExecutor";
-import TerminalOutput from "./components/TerminalOutput";
+import { useState } from "react";
+import { Toaster } from "react-hot-toast";
 import Login from "./components/Login";
+import Header from "./components/Header";
+import ConnectPanel from "./components/ConnectPanel";
+import ConnectedCard from "./components/ConnectedCard";
+import TaskPanel from "./components/TaskPanel";
+import CommandPanel from "./components/CommandPanel";
+import TerminalPanel from "./components/TerminalPanel";
 import KIModal from "./components/KIModal";
+import { useSSH } from "./hooks/useSSH";
 
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -16,7 +18,7 @@ export default function App() {
 
   const {
     wsStatus,
-    connected,
+    connectionState, // The source of truth for connection info
     running,
     output,
     kiPrompt,
@@ -30,51 +32,76 @@ export default function App() {
   const [selectedCmd, setSelectedCmd] = useState("");
 
   if (!user) {
-    return <Login onLogin={setUser} />;
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <Login onLogin={setUser} />
+      </div>
+    );
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2>Web SSH (Production MVP)</h2>
-        <div style={{ fontSize: 13 }}>
-          {user.email} | 
-          <button onClick={() => {
-            localStorage.clear();
-            window.location.reload();
-          }} style={{ marginLeft: 10, padding: "2px 8px" }}>Logout</button>
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <ConnectionForm
-          onConnect={connectSSH}
-          onDisconnect={disconnectSSH}
-          connected={connected}
-          wsStatus={wsStatus}
-          isRunning={running}
-        />
-
-        <TaskSearch onSelectCommand={setSelectedCmd} />
-      </div>
-
-      <CommandExecutor
-        selectedCmd={selectedCmd}
-        onCmdChange={setSelectedCmd}
-        onRun={() => runCommand(selectedCmd)}
-        onClear={clearOutput}
-        connected={connected}
-        isRunning={running}
+    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-blue-500/30">
+      <Toaster 
+        position="top-right" 
+        toastOptions={{
+          style: {
+            background: '#1e293b',
+            color: '#e2e8f0',
+            border: '1px solid #334155'
+          }
+        }}
+      />
+      
+      <Header 
+        user={user} 
+        onLogout={() => {
+          localStorage.removeItem("user");
+          localStorage.removeItem("token");
+          window.location.reload();
+        }} 
       />
 
-      <TerminalOutput output={output} />
+      <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
+        {/* Top Section: Connection & Tasks */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-[500px]">
+          {/* Left Column: Connection Manager */}
+          <div className="md:col-span-7 h-full min-h-0">
+            {connectionState ? (
+              <ConnectedCard 
+                connection={connectionState} 
+                onDisconnect={disconnectSSH} 
+              />
+            ) : (
+              <ConnectPanel 
+                onConnect={connectSSH} 
+                wsStatus={wsStatus} 
+              />
+            )}
+          </div>
 
+          {/* Right Column: Task Library */}
+          <div className="md:col-span-5 h-full min-h-0">
+            <TaskPanel onSelectCommand={setSelectedCmd} />
+          </div>
+        </div>
+
+        {/* Bottom Section: Command & Terminal */}
+        <div className="space-y-6">
+          <CommandPanel
+            selectedCmd={selectedCmd}
+            onCmdChange={setSelectedCmd}
+            onRun={() => runCommand(selectedCmd)}
+            onClear={clearOutput}
+            isConnected={!!connectionState}
+            isRunning={running}
+          />
+          
+          <TerminalPanel output={output} />
+        </div>
+      </main>
+
+      {/* Modals */}
       {kiPrompt && <KIModal prompt={kiPrompt} onSubmit={answerKI} />}
-
-      <p style={{ fontSize: 11, opacity: 0.6, marginTop: 12 }}>
-        Architecture: Stateless Backend + Redis Session Store + Postgres Persistence. 
-        Secrets encrypted with AES-256-GCM. Supports Password, Keys, and Keyboard-Interactive auth.
-      </p>
     </div>
   );
 }
