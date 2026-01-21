@@ -72,6 +72,19 @@ async function determineInitialCwd(conn, username) {
   return "/";
 }
 
+async function determineHostName(conn) {
+  try {
+    const { stdout, code } = await execOnce(conn, "hostname 2>/dev/null || uname -n");
+    if (code === 0) {
+      const name = String(stdout || "").trim().split(/\s+/)[0];
+      if (name) return name;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 function classifySftpEntry(attrs) {
   try {
     if (attrs?.isDirectory?.()) return "dir";
@@ -152,13 +165,14 @@ function setupWebSocket(server) {
 
           const sessionId = await createSession(ws.userId, { id: serverId, host, port, username, authType });
           const cwd = await determineInitialCwd(conn, username);
-          await updateSession(sessionId, { cwd });
+          const hostName = await determineHostName(conn);
+          await updateSession(sessionId, { cwd, hostName });
           activeConnections.set(sessionId, conn);
           ws.sessions.add(sessionId);
           
           ws.send(JSON.stringify({ 
             type: "connected", 
-            payload: { sessionId, host, port, username, authType, cwd } 
+            payload: { sessionId, host, port, username, authType, cwd, hostName } 
           }));
           logger.info(`SSH Session created: ${sessionId}`, { userId: ws.userId, host });
         });
@@ -181,7 +195,16 @@ function setupWebSocket(server) {
         const { sessionId } = msg.payload;
         try {
           const conn = await getOrConnectSSH(sessionId, ws);
-          const session = await getSession(sessionId);
+          let session = await getSession(sessionId);
+
+          if (session) {
+            const patch = {};
+            if (!session.cwd) patch.cwd = await determineInitialCwd(conn, session.username);
+            if (!session.hostName) patch.hostName = await determineHostName(conn);
+            if (Object.keys(patch).length) {
+              session = await updateSession(sessionId, patch);
+            }
+          }
           ws.sessions.add(sessionId);
           
           ws.send(JSON.stringify({ 
@@ -191,6 +214,7 @@ function setupWebSocket(server) {
             cwd: session?.cwd || "/",
             connection: session ? {
               host: session.host,
+              hostName: session.hostName || null,
               port: session.port,
               username: session.username,
               authType: session.authType

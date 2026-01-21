@@ -3,6 +3,20 @@ import toast from "react-hot-toast";
 
 const WS_URL = "ws://localhost:8080";
 
+function stripAnsi(input) {
+  const str = String(input ?? "");
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+}
+
+function buildPrompt(connection, cwd) {
+  if (!connection) return "";
+  const host = connection.hostName || connection.host || "host";
+  const user = connection.username || "user";
+  const path = cwd || "/";
+  return `${user}@${host}:${path}`;
+}
+
 export function useSSH() {
   const [wsStatus, setWsStatus] = useState("disconnected"); // disconnected, connected, error
   const [connectionState, setConnectionState] = useState(null); // { sessionId, host, port, username, authType }
@@ -18,6 +32,19 @@ export function useSSH() {
   const pendingConnectRef = useRef(null);
   const pendingDirRequestRef = useRef(null);
   const sessionIdRef = useRef(null);
+  const connectionRef = useRef(null);
+  const cwdRef = useRef("/");
+
+  const applyConnection = useCallback((next) => {
+    connectionRef.current = next;
+    setConnectionState(next);
+  }, []);
+
+  const applyCwd = useCallback((next) => {
+    const value = next || "/";
+    cwdRef.current = value;
+    setCwd(value);
+  }, []);
 
   const send = useCallback((payload) => {
     if (!wsRef.current || wsRef.current.readyState !== 1) return false;
@@ -51,6 +78,16 @@ export function useSSH() {
         ws.send(JSON.stringify({ type: "connect", payload: pendingConnectRef.current }));
         pendingConnectRef.current = null;
       }
+
+      if (pendingDirRequestRef.current && sessionIdRef.current) {
+        const pending = pendingDirRequestRef.current;
+        pendingDirRequestRef.current = null;
+        if (pending.kind === "list_dir") {
+          ws.send(JSON.stringify({ type: "list_dir", payload: { sessionId: sessionIdRef.current, ...(pending.path ? { path: pending.path } : {}) } }));
+        } else if (pending.kind === "set_cwd" && pending.path) {
+          ws.send(JSON.stringify({ type: "set_cwd", payload: { sessionId: sessionIdRef.current, path: pending.path } }));
+        }
+      }
     };
 
     ws.onclose = () => {
@@ -59,6 +96,8 @@ export function useSSH() {
       pendingConnectRef.current = null;
       pendingDirRequestRef.current = null;
       sessionIdRef.current = null;
+      connectionRef.current = null;
+      cwdRef.current = "/";
       setConnectionState(null);
       setCwd("/");
       setDirPath("/");
@@ -73,6 +112,8 @@ export function useSSH() {
       pendingConnectRef.current = null;
       pendingDirRequestRef.current = null;
       sessionIdRef.current = null;
+      connectionRef.current = null;
+      cwdRef.current = "/";
       toast.error("WebSocket connection error");
     };
 
@@ -89,10 +130,10 @@ export function useSSH() {
         case "connected":
           // New connection success
           toast.success("SSH Connected");
-          setConnectionState(msg.payload);
+          applyConnection(msg.payload);
           sessionIdRef.current = msg.payload?.sessionId || null;
           if (msg.payload?.cwd) {
-            setCwd(msg.payload.cwd);
+            applyCwd(msg.payload.cwd);
             setDirPath(msg.payload.cwd);
             setDirLoading(true);
             send({ type: "list_dir", payload: { sessionId: msg.payload.sessionId, path: msg.payload.cwd } });
@@ -109,24 +150,24 @@ export function useSSH() {
             toast.success("Session Restored");
             sessionIdRef.current = msg.sessionId || null;
             if (msg.connection) {
-              setConnectionState({ sessionId: msg.sessionId, ...msg.connection });
+              applyConnection({ sessionId: msg.sessionId, ...msg.connection });
             } else {
               // Fallback if backend didn't send details (shouldn't happen with our fix)
-              setConnectionState({ sessionId: msg.sessionId, host: "Restored Session", username: "Unknown", port: 22 });
+              applyConnection({ sessionId: msg.sessionId, host: "Restored Session", username: "Unknown", port: 22 });
             }
 
             const nextCwd = msg.cwd || "/";
-            setCwd(nextCwd);
+            applyCwd(nextCwd);
             setDirPath(nextCwd);
             setDirLoading(true);
             send({ type: "list_dir", payload: { sessionId: msg.sessionId, path: nextCwd } });
           } else {
             // Disconnect or Attach failed
             toast.dismiss("attach");
-            setConnectionState(null);
+            applyConnection(null);
             localStorage.removeItem("ssh_session_id");
             sessionIdRef.current = null;
-            setCwd("/");
+            applyCwd("/");
             setDirPath("/");
             setDirEntries([]);
             setDirLoading(false);
@@ -134,7 +175,7 @@ export function useSSH() {
           break;
         case "cwd":
           if (msg.sessionId && sessionIdRef.current && msg.sessionId !== sessionIdRef.current) break;
-          setCwd(msg.cwd || "/");
+          applyCwd(msg.cwd || "/");
           setDirPath(msg.cwd || "/");
           setDirLoading(true);
           if (!send({ type: "list_dir", payload: { sessionId: msg.sessionId || sessionIdRef.current, path: msg.cwd || "/" } })) {
@@ -152,12 +193,15 @@ export function useSSH() {
           break;
         case "exec_start":
           setRunning(true);
-          if (msg.cwd) setCwd(msg.cwd);
-          setOutput(o => o + `\n${msg.cwd ? `${msg.cwd} ` : ""}$ ${msg.command}\n`);
+          if (msg.cwd) applyCwd(msg.cwd);
+          setOutput((o) => {
+            const prompt = buildPrompt(connectionRef.current, msg.cwd || cwdRef.current);
+            return o + `\n${prompt ? `${prompt} ` : ""}$ ${msg.command}\n`;
+          });
           break;
         case "stdout":
         case "stderr":
-          setOutput(o => o + msg.data);
+          setOutput((o) => o + stripAnsi(msg.data));
           break;
         case "exec_end":
           setRunning(false);
@@ -170,7 +214,7 @@ export function useSSH() {
           break;
       }
     };
-  }, [send]);
+  }, [applyConnection, applyCwd, send]);
 
   useEffect(() => {
     connectWs();
@@ -183,9 +227,9 @@ export function useSSH() {
   const connectSSH = (payload) => {
     // User explicitly wants a new session; don't auto-attach an old one.
     localStorage.removeItem("ssh_session_id");
-    setConnectionState(null);
+    applyConnection(null);
     sessionIdRef.current = null;
-    setCwd("/");
+    applyCwd("/");
     setDirPath("/");
     setDirEntries([]);
     setDirLoading(false);
@@ -221,10 +265,10 @@ export function useSSH() {
     if (connectionState?.sessionId) {
       wsRef.current?.send(JSON.stringify({ type: "disconnect", payload: { sessionId: connectionState.sessionId } }));
     }
-    setConnectionState(null);
+    applyConnection(null);
     localStorage.removeItem("ssh_session_id");
     sessionIdRef.current = null;
-    setCwd("/");
+    applyCwd("/");
     setDirPath("/");
     setDirEntries([]);
     setDirLoading(false);

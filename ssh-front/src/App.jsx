@@ -117,7 +117,14 @@ export default function App() {
             cwd={cwd}
           />
           
-          <TerminalPanel output={output} />
+          <TerminalPanel
+            output={output}
+            title={
+              connectionState
+                ? `${connectionState.username || "user"}@${connectionState.hostName || connectionState.host} — ${cwd || "/"}`
+                : "Not connected"
+            }
+          />
         </div>
       </main>
 

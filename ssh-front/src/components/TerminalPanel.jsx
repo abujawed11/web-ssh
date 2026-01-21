@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 
-export default function TerminalPanel({ output }) {
+export default function TerminalPanel({ output, title }) {
   const outputRef = useRef(null);
   const [copied, setCopied] = useState(false);
 
@@ -28,7 +28,7 @@ export default function TerminalPanel({ output }) {
         </div>
         <div className="flex items-center gap-1 text-xs text-slate-500 font-mono">
           <Terminal className="w-3 h-3" />
-          bash — 80x24
+          {title || "Not connected"}
         </div>
         <button 
           onClick={handleCopy}
