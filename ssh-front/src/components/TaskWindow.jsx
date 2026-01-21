@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
-import { Search, Play, Copy, TerminalSquare, Server, X } from "lucide-react";
-import TargetSelector from "./TargetSelector";
-import ServicePickerModal from "./ServicePickerModal";
+import { Search, Play, Copy, TerminalSquare, Server, X, Package, Box } from "lucide-react";
+import TargetHubModal from "./TargetHubModal";
 
 function renderTemplate(template, vars) {
   const str = String(template || "");
@@ -41,15 +40,26 @@ export default function TaskWindow({
   services,
   servicesLoading,
   onFetchServices,
+  dockerContainers,
+  dockerContainersLoading,
+  onFetchDockerContainers,
+  dockerImages,
+  dockerImagesLoading,
+  onFetchDockerImages,
+  nginxSites,
+  nginxSitesLoading,
+  onFetchNginxSites,
+  nginxSitesAvailable,
+  nginxSitesAvailableLoading,
+  onFetchNginxSitesAvailable,
 }) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [targetType, setTargetType] = useState("service");
   const [targetOpen, setTargetOpen] = useState(false);
-  const [servicePickerOpen, setServicePickerOpen] = useState(false);
+  const [targetHubOpen, setTargetHubOpen] = useState(false);
   const [targets, setTargets] = useState(() => loadTargets(sessionId));
 
-  const vars = useMemo(() => ({ service: targets.service }), [targets.service]);
+  const vars = useMemo(() => ({ ...(targets || {}) }), [targets]);
 
   const tasks = useMemo(() => {
     const list = group?.tasks || [];
@@ -63,24 +73,149 @@ export default function TaskWindow({
 
   const title = group?.title || "Tasks";
   const desc = group?.description || "Select a task group to see commands.";
-  const isServiceControl = group?.id === "service-control";
-  const needsService = useMemo(
-    () => (group?.tasks || []).some((t) => (t.requires || []).includes("service")),
-    [group]
-  );
+  const requiredKeys = useMemo(() => {
+    const set = new Set();
+    for (const t of group?.tasks || []) {
+      for (const k of t.requires || []) set.add(k);
+    }
+    return Array.from(set);
+  }, [group]);
 
-  const setService = (name) => {
-    const next = { ...targets, service: name };
+  const needsTargets = requiredKeys.length > 0;
+
+  const setTargetKey = (key, value) => {
+    const next = { ...targets, [key]: value };
     setTargets(next);
     saveTargets(sessionId, next);
   };
 
-  const clearService = () => {
+  const clearTargetKey = (key) => {
     const next = { ...targets };
-    delete next.service;
+    delete next[key];
     setTargets(next);
     saveTargets(sessionId, next);
   };
+
+  const openTargets = () => {
+    if (!connected) return;
+    // ensure initial data for the first required key
+    const first = requiredKeys[0];
+    if (first === "service") onFetchServices?.();
+    if (first === "container") onFetchDockerContainers?.();
+    if (first === "image") onFetchDockerImages?.();
+    if (first === "nginx_site") onFetchNginxSites?.();
+    if (first === "nginx_site_available") onFetchNginxSitesAvailable?.();
+    setTargetHubOpen(true);
+  };
+
+  const tabs = [];
+
+  if (requiredKeys.includes("service")) {
+    tabs.push({
+      key: "service",
+      label: "Services",
+      loading: !!servicesLoading,
+      items: services || [],
+      onRefresh: onFetchServices,
+      onEnsure: onFetchServices,
+      keyFor: (it) => it.rawUnit || it.name,
+      filterText: (it) => `${it.name} ${it.state} ${it.status} ${it.description}`,
+      renderRow: (it) => (
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-slate-200 font-semibold truncate">{it.name}</div>
+            <div className="text-[11px] text-slate-500 truncate">{it.description || it.rawUnit}</div>
+          </div>
+          <div className="text-xs text-slate-500 shrink-0">{it.state}/{it.status}</div>
+        </div>
+      ),
+      onSelect: (it) => setTargetKey("service", it.name),
+    });
+  }
+
+  if (requiredKeys.includes("container")) {
+    tabs.push({
+      key: "container",
+      label: "Containers",
+      loading: !!dockerContainersLoading,
+      items: dockerContainers || [],
+      onRefresh: onFetchDockerContainers,
+      onEnsure: onFetchDockerContainers,
+      keyFor: (it) => it.id || it.name,
+      filterText: (it) => `${it.name} ${it.image} ${it.status}`,
+      renderRow: (it) => (
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-slate-200 font-semibold truncate">{it.name}</div>
+            <div className="text-[11px] text-slate-500 truncate">{it.image}</div>
+          </div>
+          <div className="text-xs text-slate-500 shrink-0">{it.state}</div>
+        </div>
+      ),
+      onSelect: (it) => setTargetKey("container", it.name),
+    });
+  }
+
+  if (requiredKeys.includes("image")) {
+    tabs.push({
+      key: "image",
+      label: "Images",
+      loading: !!dockerImagesLoading,
+      items: dockerImages || [],
+      onRefresh: onFetchDockerImages,
+      onEnsure: onFetchDockerImages,
+      keyFor: (it) => it.id || it.ref,
+      filterText: (it) => `${it.ref} ${it.id} ${it.size}`,
+      renderRow: (it) => (
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-slate-200 font-semibold truncate">{it.ref}</div>
+            <div className="text-[11px] text-slate-500 truncate">{it.id}</div>
+          </div>
+          <div className="text-xs text-slate-500 shrink-0">{it.size}</div>
+        </div>
+      ),
+      onSelect: (it) => setTargetKey("image", it.ref),
+    });
+  }
+
+  if (requiredKeys.includes("nginx_site")) {
+    tabs.push({
+      key: "nginx_site",
+      label: "Nginx Sites",
+      loading: !!nginxSitesLoading,
+      items: nginxSites || [],
+      onRefresh: onFetchNginxSites,
+      onEnsure: onFetchNginxSites,
+      keyFor: (it) => it.name,
+      filterText: (it) => it.name,
+      renderRow: (it) => (
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm text-slate-200 font-semibold truncate">{it.name}</div>
+        </div>
+      ),
+      onSelect: (it) => setTargetKey("nginx_site", it.name),
+    });
+  }
+
+  if (requiredKeys.includes("nginx_site_available")) {
+    tabs.push({
+      key: "nginx_site_available",
+      label: "Nginx Sites (available)",
+      loading: !!nginxSitesAvailableLoading,
+      items: nginxSitesAvailable || [],
+      onRefresh: onFetchNginxSitesAvailable,
+      onEnsure: onFetchNginxSitesAvailable,
+      keyFor: (it) => it.name,
+      filterText: (it) => it.name,
+      renderRow: (it) => (
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm text-slate-200 font-semibold truncate">{it.name}</div>
+        </div>
+      ),
+      onSelect: (it) => setTargetKey("nginx_site_available", it.name),
+    });
+  }
 
   return (
     <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden flex flex-col h-full min-h-0">
@@ -94,42 +229,39 @@ export default function TaskWindow({
             <div className="text-xs text-slate-500 mt-1 truncate">{desc}</div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {needsService && !targetOpen && (
+            {needsTargets && !targetOpen && (
               <div className="hidden md:flex items-center gap-2">
-                {targets.service ? (
-                  <div className="flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-full px-3 py-1.5 max-w-[240px]">
+                {requiredKeys.filter((k) => targets[k]).map((k) => (
+                  <div key={k} className="flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-full px-3 py-1.5 max-w-[240px]">
                     <Server className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <div className="text-xs text-slate-200 truncate" title={targets.service}>
-                      {targets.service}
+                    <div className="text-xs text-slate-200 truncate" title={`${k}: ${targets[k]}`}>
+                      {targets[k]}
                     </div>
                     <button
                       type="button"
-                      onClick={clearService}
+                      onClick={() => clearTargetKey(k)}
                       className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-200"
-                      title="Clear service"
+                      title="Clear"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!connected) return;
-                      onFetchServices?.();
-                      setServicePickerOpen(true);
-                    }}
-                    disabled={!connected}
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-200 text-sm"
-                    title={connected ? "Pick a service" : "Connect first"}
-                  >
-                    Pick service
-                  </button>
-                )}
+                ))}
+
+                <button
+                  type="button"
+                  onClick={openTargets}
+                  disabled={!connected}
+                  className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-200 text-sm flex items-center gap-2"
+                  title={connected ? "Pick targets" : "Connect first"}
+                >
+                  <Package className="w-4 h-4 text-blue-400" />
+                  Pick
+                </button>
               </div>
             )}
 
-            {needsService && (
+            {needsTargets && (
               <button
                 type="button"
                 onClick={() => setTargetOpen((v) => !v)}
@@ -141,9 +273,9 @@ export default function TaskWindow({
                     : "bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-800",
                   !connected && "opacity-50 cursor-not-allowed"
                 )}
-                title={targetOpen ? "Hide target" : "Target"}
+                title={targetOpen ? "Hide targets" : "Targets"}
               >
-                <Server className="w-4 h-4" />
+                <Box className="w-4 h-4" />
               </button>
             )}
 
@@ -189,30 +321,37 @@ export default function TaskWindow({
           </div>
         )}
 
-        {needsService && targetOpen && (
+        {needsTargets && targetOpen && (
           <div className="mt-3">
-            <TargetSelector
-              connected={connected}
-              targetType={targetType}
-              onTargetTypeChange={setTargetType}
-              selectedService={targets.service}
-              onClearService={clearService}
-              onPickService={() => {
-                if (!connected) return;
-                onFetchServices?.();
-                setServicePickerOpen(true);
-              }}
-            />
-
-            {isServiceControl && targets.service && (
-              <div className="mt-2 text-xs text-slate-400 flex items-center gap-2">
-                <Server className="w-4 h-4 text-emerald-400" />
-                Preview:
-                <span className="text-slate-300 font-mono truncate">
-                  {renderTemplate("sudo systemctl status {{service}} --no-pager", vars)}
-                </span>
+            <div className="flex items-center justify-between gap-3 bg-slate-900/30 border border-slate-700/60 rounded-xl p-3">
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Targets</div>
+              <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap justify-end">
+                {requiredKeys.filter((k) => targets[k]).map((k) => (
+                  <div key={k} className="flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-full px-3 py-1.5 max-w-[320px]">
+                    <Server className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div className="text-sm text-slate-200 truncate" title={`${k}: ${targets[k]}`}>
+                      {targets[k]}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => clearTargetKey(k)}
+                      className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-slate-200"
+                      title="Clear"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={openTargets}
+                  disabled={!connected}
+                  className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-semibold"
+                >
+                  Pick targets
+                </button>
               </div>
-            )}
+            </div>
           </div>
         )}
       </div>
@@ -226,11 +365,7 @@ export default function TaskWindow({
           tasks.map((t) => {
             const missing = missingRequires(t, vars);
             const disabled = !connected || missing.length > 0;
-            const tooltip = !connected
-              ? "Connect to run"
-              : missing.length
-                ? "Select a service first"
-                : "";
+            const tooltip = !connected ? "Connect to run" : missing.length ? `Select ${missing[0]} first` : "";
             const rendered = renderTemplate(t.command, vars);
 
             return (
@@ -279,13 +414,11 @@ export default function TaskWindow({
         )}
       </div>
 
-      <ServicePickerModal
-        open={servicePickerOpen}
-        onClose={() => setServicePickerOpen(false)}
-        services={services}
-        loading={servicesLoading}
-        onRefresh={onFetchServices}
-        onSelect={(name) => setService(name)}
+      <TargetHubModal
+        open={targetHubOpen}
+        onClose={() => setTargetHubOpen(false)}
+        tabs={tabs}
+        initialTabKey={tabs[0]?.key}
       />
     </div>
   );

@@ -29,6 +29,14 @@ export default function App() {
     dirLoading,
     servicesCache,
     isFetchingServices,
+    dockerContainersCache,
+    isFetchingDockerContainers,
+    dockerImagesCache,
+    isFetchingDockerImages,
+    nginxSitesCache,
+    isFetchingNginxSites,
+    nginxSitesAvailableCache,
+    isFetchingNginxSitesAvailable,
     running,
     runningExecId,
     output,
@@ -49,6 +57,10 @@ export default function App() {
     readFile,
     writeFile,
     fetchServices,
+    fetchDockerContainers,
+    fetchDockerImages,
+    fetchNginxSites,
+    fetchNginxSitesAvailable,
     answerKI
   } = useSSH();
 
@@ -138,6 +150,18 @@ export default function App() {
                 services={servicesCache}
                 servicesLoading={isFetchingServices}
                 onFetchServices={fetchServices}
+                dockerContainers={dockerContainersCache}
+                dockerContainersLoading={isFetchingDockerContainers}
+                onFetchDockerContainers={fetchDockerContainers}
+                dockerImages={dockerImagesCache}
+                dockerImagesLoading={isFetchingDockerImages}
+                onFetchDockerImages={fetchDockerImages}
+                nginxSites={nginxSitesCache}
+                nginxSitesLoading={isFetchingNginxSites}
+                onFetchNginxSites={fetchNginxSites}
+                nginxSitesAvailable={nginxSitesAvailableCache}
+                nginxSitesAvailableLoading={isFetchingNginxSitesAvailable}
+                onFetchNginxSitesAvailable={fetchNginxSitesAvailable}
               />
             </div>
 

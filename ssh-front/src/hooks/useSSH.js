@@ -26,6 +26,14 @@ export function useSSH() {
   const [dirLoading, setDirLoading] = useState(false);
   const [servicesCache, setServicesCache] = useState([]);
   const [isFetchingServices, setIsFetchingServices] = useState(false);
+  const [dockerContainersCache, setDockerContainersCache] = useState([]);
+  const [isFetchingDockerContainers, setIsFetchingDockerContainers] = useState(false);
+  const [dockerImagesCache, setDockerImagesCache] = useState([]);
+  const [isFetchingDockerImages, setIsFetchingDockerImages] = useState(false);
+  const [nginxSitesCache, setNginxSitesCache] = useState([]);
+  const [isFetchingNginxSites, setIsFetchingNginxSites] = useState(false);
+  const [nginxSitesAvailableCache, setNginxSitesAvailableCache] = useState([]);
+  const [isFetchingNginxSitesAvailable, setIsFetchingNginxSitesAvailable] = useState(false);
   const [running, setRunning] = useState(false);
   const [runningExecId, setRunningExecId] = useState(null);
   const [output, setOutput] = useState("");
@@ -116,6 +124,7 @@ export function useSSH() {
     ws.onclose = () => {
       setWsStatus("disconnected");
       toast.dismiss("ws_connecting");
+      toast.dismiss("attach");
       pendingConnectRef.current = null;
       pendingDirRequestRef.current = null;
       sessionIdRef.current = null;
@@ -128,6 +137,14 @@ export function useSSH() {
       setDirLoading(false);
       setServicesCache([]);
       setIsFetchingServices(false);
+      setDockerContainersCache([]);
+      setIsFetchingDockerContainers(false);
+      setDockerImagesCache([]);
+      setIsFetchingDockerImages(false);
+      setNginxSitesCache([]);
+      setIsFetchingNginxSites(false);
+      setNginxSitesAvailableCache([]);
+      setIsFetchingNginxSitesAvailable(false);
       setRunning(false);
       setRunningExecId(null);
     };
@@ -135,6 +152,7 @@ export function useSSH() {
     ws.onerror = () => {
       setWsStatus("error");
       toast.dismiss("ws_connecting");
+      toast.dismiss("attach");
       pendingConnectRef.current = null;
       pendingDirRequestRef.current = null;
       sessionIdRef.current = null;
@@ -142,6 +160,14 @@ export function useSSH() {
       cwdRef.current = "/";
       setServicesCache([]);
       setIsFetchingServices(false);
+      setDockerContainersCache([]);
+      setIsFetchingDockerContainers(false);
+      setDockerImagesCache([]);
+      setIsFetchingDockerImages(false);
+      setNginxSitesCache([]);
+      setIsFetchingNginxSites(false);
+      setNginxSitesAvailableCache([]);
+      setIsFetchingNginxSitesAvailable(false);
       setRunningExecId(null);
       toast.error("WebSocket connection error");
     };
@@ -172,6 +198,7 @@ export function useSSH() {
           break;
         case "connected":
           // New connection success
+          toast.dismiss("attach");
           toast.success("SSH Connected");
           applyConnection(msg.payload);
           sessionIdRef.current = msg.payload?.sessionId || null;
@@ -257,11 +284,36 @@ export function useSSH() {
           setServicesCache(Array.isArray(msg.entries) ? msg.entries : []);
           setIsFetchingServices(false);
           break;
+        case "docker_containers_list":
+          if (msg.sessionId && sessionIdRef.current && msg.sessionId !== sessionIdRef.current) break;
+          setDockerContainersCache(Array.isArray(msg.entries) ? msg.entries : []);
+          setIsFetchingDockerContainers(false);
+          break;
+        case "docker_images_list":
+          if (msg.sessionId && sessionIdRef.current && msg.sessionId !== sessionIdRef.current) break;
+          setDockerImagesCache(Array.isArray(msg.entries) ? msg.entries : []);
+          setIsFetchingDockerImages(false);
+          break;
+        case "nginx_sites_list":
+          if (msg.sessionId && sessionIdRef.current && msg.sessionId !== sessionIdRef.current) break;
+          setNginxSitesCache(Array.isArray(msg.entries) ? msg.entries : []);
+          setIsFetchingNginxSites(false);
+          break;
+        case "nginx_sites_available_list":
+          if (msg.sessionId && sessionIdRef.current && msg.sessionId !== sessionIdRef.current) break;
+          setNginxSitesAvailableCache(Array.isArray(msg.entries) ? msg.entries : []);
+          setIsFetchingNginxSitesAvailable(false);
+          break;
         case "error":
+          toast.dismiss("attach");
           setRunning(false);
           setDirLoading(false);
           if (!requestHandled) toast.error(msg.message);
           setIsFetchingServices(false);
+          setIsFetchingDockerContainers(false);
+          setIsFetchingDockerImages(false);
+          setIsFetchingNginxSites(false);
+          setIsFetchingNginxSitesAvailable(false);
           break;
       }
     };
@@ -277,6 +329,7 @@ export function useSSH() {
 
   const connectSSH = (payload) => {
     // User explicitly wants a new session; don't auto-attach an old one.
+    toast.dismiss("attach");
     localStorage.removeItem("ssh_session_id");
     applyConnection(null);
     sessionIdRef.current = null;
@@ -354,6 +407,32 @@ export function useSSH() {
     wsRef.current?.send(JSON.stringify({ type: "list_services", payload: { sessionId: connectionState.sessionId } }));
   };
 
+  const fetchDockerContainers = () => {
+    if (!connectionState?.sessionId) return;
+    setIsFetchingDockerContainers(true);
+    wsRef.current?.send(JSON.stringify({ type: "list_docker_containers", payload: { sessionId: connectionState.sessionId } }));
+  };
+
+  const fetchDockerImages = () => {
+    if (!connectionState?.sessionId) return;
+    setIsFetchingDockerImages(true);
+    wsRef.current?.send(JSON.stringify({ type: "list_docker_images", payload: { sessionId: connectionState.sessionId } }));
+  };
+
+  const fetchNginxSites = () => {
+    if (!connectionState?.sessionId) return;
+    setIsFetchingNginxSites(true);
+    wsRef.current?.send(JSON.stringify({ type: "list_nginx_sites", payload: { sessionId: connectionState.sessionId } }));
+  };
+
+  const fetchNginxSitesAvailable = () => {
+    if (!connectionState?.sessionId) return;
+    setIsFetchingNginxSitesAvailable(true);
+    wsRef.current?.send(
+      JSON.stringify({ type: "list_nginx_sites_available", payload: { sessionId: connectionState.sessionId } })
+    );
+  };
+
   const answerKI = (answers) => {
     wsRef.current?.send(JSON.stringify({ type: "ki_answer", payload: { answers } }));
     setKiPrompt(null);
@@ -368,6 +447,14 @@ export function useSSH() {
     dirLoading,
     servicesCache,
     isFetchingServices,
+    dockerContainersCache,
+    isFetchingDockerContainers,
+    dockerImagesCache,
+    isFetchingDockerImages,
+    nginxSitesCache,
+    isFetchingNginxSites,
+    nginxSitesAvailableCache,
+    isFetchingNginxSitesAvailable,
     running,
     runningExecId,
     output,
@@ -387,6 +474,10 @@ export function useSSH() {
     runCommand,
     stopExec,
     fetchServices,
+    fetchDockerContainers,
+    fetchDockerImages,
+    fetchNginxSites,
+    fetchNginxSitesAvailable,
     clearOutput: () => setOutput(""),
     answerKI
   };

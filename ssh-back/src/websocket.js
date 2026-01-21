@@ -150,6 +150,64 @@ function serviceSortRank(entry) {
   return 2;
 }
 
+function parseDockerPs(output) {
+  const lines = String(output || "")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter(Boolean);
+
+  const entries = [];
+  for (const line of lines) {
+    const parts = line.split("\t");
+    if (parts.length < 4) continue;
+    const name = parts[0];
+    const image = parts[1];
+    const status = parts[2];
+    const id = parts[3];
+    let state = "other";
+    if (/^Up\b/i.test(status)) state = "running";
+    else if (/^Exited\b/i.test(status)) state = "exited";
+    entries.push({ name, id, image, status, state });
+  }
+
+  entries.sort((a, b) => {
+    const rank = (x) => (x.state === "running" ? 0 : x.state === "exited" ? 1 : 2);
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    return a.name.localeCompare(b.name);
+  });
+
+  return entries;
+}
+
+function parseDockerImages(output) {
+  const lines = String(output || "")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter(Boolean);
+
+  const entries = [];
+  for (const line of lines) {
+    const parts = line.split("\t");
+    if (parts.length < 3) continue;
+    const ref = parts[0];
+    const id = parts[1];
+    const size = parts[2];
+    entries.push({ ref, id, size });
+  }
+
+  entries.sort((a, b) => a.ref.localeCompare(b.ref));
+  return entries;
+}
+
+function parseLinesToList(output) {
+  return String(output || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && l !== "." && l !== "..");
+}
+
 function clampStringSize(str, maxBytes) {
   const buf = Buffer.from(String(str ?? ""), "utf8");
   if (buf.length <= maxBytes) return buf.toString("utf8");
@@ -501,6 +559,72 @@ function setupWebSocket(server) {
           ws.send(JSON.stringify({ type: "services_list", sessionId, entries }));
         } catch (err) {
           ws.send(JSON.stringify({ type: "error", message: `list_services failed: ${err.message}` }));
+        }
+        return;
+      }
+
+      // 2ab) LIST_DOCKER_CONTAINERS
+      if (msg.type === "list_docker_containers") {
+        const { sessionId } = msg.payload || {};
+        try {
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const cmd = "docker ps -a --format '{{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.ID}}'";
+          const { stdout, code, stderr } = await execOnce(conn, cmd);
+          if (code !== 0) throw new Error(stderr || "docker ps failed");
+          const entries = parseDockerPs(stdout);
+          ws.send(JSON.stringify({ type: "docker_containers_list", sessionId, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: `list_docker_containers failed: ${err.message}` }));
+        }
+        return;
+      }
+
+      // 2ac) LIST_DOCKER_IMAGES
+      if (msg.type === "list_docker_images") {
+        const { sessionId } = msg.payload || {};
+        try {
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const cmd = "docker images --format '{{.Repository}}:{{.Tag}}\\t{{.ID}}\\t{{.Size}}'";
+          const { stdout, code, stderr } = await execOnce(conn, cmd);
+          if (code !== 0) throw new Error(stderr || "docker images failed");
+          const entries = parseDockerImages(stdout);
+          ws.send(JSON.stringify({ type: "docker_images_list", sessionId, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: `list_docker_images failed: ${err.message}` }));
+        }
+        return;
+      }
+
+      // 2ad) LIST_NGINX_SITES
+      if (msg.type === "list_nginx_sites") {
+        const { sessionId } = msg.payload || {};
+        try {
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const cmd = "ls -1 /etc/nginx/sites-enabled 2>/dev/null || true";
+          const { stdout } = await execOnce(conn, cmd);
+          const names = parseLinesToList(stdout);
+          names.sort((a, b) => a.localeCompare(b));
+          const entries = names.map((name) => ({ name }));
+          ws.send(JSON.stringify({ type: "nginx_sites_list", sessionId, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: `list_nginx_sites failed: ${err.message}` }));
+        }
+        return;
+      }
+
+      // 2ae) LIST_NGINX_SITES_AVAILABLE
+      if (msg.type === "list_nginx_sites_available") {
+        const { sessionId } = msg.payload || {};
+        try {
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const cmd = "ls -1 /etc/nginx/sites-available 2>/dev/null || true";
+          const { stdout } = await execOnce(conn, cmd);
+          const names = parseLinesToList(stdout);
+          names.sort((a, b) => a.localeCompare(b));
+          const entries = names.map((name) => ({ name }));
+          ws.send(JSON.stringify({ type: "nginx_sites_available_list", sessionId, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: `list_nginx_sites_available failed: ${err.message}` }));
         }
         return;
       }
