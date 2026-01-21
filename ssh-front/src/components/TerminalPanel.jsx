@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Check, Terminal } from "lucide-react";
+import { Copy, Check, Terminal, Square } from "lucide-react";
 
-export default function TerminalPanel({ output, title, className }) {
+export default function TerminalPanel({ output, title, className, onStop, canStop }) {
   const outputRef = useRef(null);
   const [copied, setCopied] = useState(false);
 
@@ -35,13 +35,25 @@ export default function TerminalPanel({ output, title, className }) {
           <Terminal className="w-3 h-3" />
           {title || "Not connected"}
         </div>
-        <button 
-          onClick={handleCopy}
-          className="p-1 hover:bg-slate-800 rounded transition-colors text-slate-500 hover:text-slate-300"
-          title="Copy Output"
-        >
-          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-        </button>
+        <div className="flex items-center gap-2 pr-1">
+          {canStop && (
+            <button
+              type="button"
+              onClick={onStop}
+              className="p-1 hover:bg-red-500/10 rounded transition-colors text-slate-500 hover:text-red-300"
+              title="Stop running command"
+            >
+              <Square className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button 
+            onClick={handleCopy}
+            className="p-1 hover:bg-slate-800 rounded transition-colors text-slate-500 hover:text-slate-300"
+            title="Copy Output"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+        </div>
       </div>
       
       <pre

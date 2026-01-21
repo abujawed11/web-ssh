@@ -7,6 +7,8 @@ const { verifyToken } = require("./auth");
 const { createSession, getSession, updateSession, deleteSession, getOrConnectSSH, getOrCreateSftp, dropSftp, activeConnections } = require("./sessionManager");
 const { encrypt, decrypt } = require("./crypto");
 
+const activeExecs = new Map(); // execId -> { sessionId, stream, ws }
+
 function shQuote(value) {
   const str = String(value ?? "");
   return `'${str.replace(/'/g, `'\\''`)}'`;
@@ -94,6 +96,58 @@ function classifySftpEntry(attrs) {
     // ignore
   }
   return "other";
+}
+
+function parseSystemctlListUnits(output) {
+  const lines = String(output || "")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter(Boolean);
+
+  const entries = [];
+  for (const line of lines) {
+    // UNIT LOAD ACTIVE SUB DESCRIPTION...
+    const m = line.match(/^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.*)$/);
+    if (!m) continue;
+    const rawUnit = m[1];
+    if (!rawUnit.endsWith(".service")) continue;
+    const name = rawUnit.replace(/\.service$/i, "");
+    const load = m[2];
+    const state = m[3];
+    const status = m[4];
+    const description = m[5] || "";
+    entries.push({ name, rawUnit, load, state, status, description });
+  }
+  return entries;
+}
+
+function parseSystemctlUnitFiles(output) {
+  const lines = String(output || "")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter(Boolean);
+
+  const entries = [];
+  for (const line of lines) {
+    // UNIT FILE STATE [VENDOR PRESET]
+    const m = line.match(/^(\S+)\s+(\S+)(?:\s+(.*))?$/);
+    if (!m) continue;
+    const rawUnit = m[1];
+    if (!rawUnit.endsWith(".service")) continue;
+    const name = rawUnit.replace(/\.service$/i, "");
+    const state = m[2] || "unknown";
+    const description = (m[3] || "").trim();
+    entries.push({ name, rawUnit, load: "n/a", state, status: state, description });
+  }
+  return entries;
+}
+
+function serviceSortRank(entry) {
+  const state = String(entry.state || "").toLowerCase();
+  const status = String(entry.status || "").toLowerCase();
+  if (state === "active" && (status === "running" || status === "exited")) return 0;
+  if (state === "failed" || status === "failed") return 1;
+  return 2;
 }
 
 function clampStringSize(str, maxBytes) {
@@ -421,6 +475,36 @@ function setupWebSocket(server) {
         return;
       }
 
+      // 2aa) LIST_SERVICES
+      if (msg.type === "list_services") {
+        const { sessionId } = msg.payload || {};
+        try {
+          const conn = await getOrConnectSSH(sessionId, ws);
+
+          const cmdUnits = "systemctl list-units --type=service --all --no-legend --no-pager";
+          const { stdout: out1, code: code1 } = await execOnce(conn, cmdUnits);
+          let entries = parseSystemctlListUnits(out1);
+
+          if (!entries.length || code1 !== 0) {
+            const cmdFiles = "systemctl list-unit-files --type=service --no-legend --no-pager";
+            const { stdout: out2 } = await execOnce(conn, cmdFiles);
+            entries = parseSystemctlUnitFiles(out2);
+          }
+
+          entries.sort((a, b) => {
+            const ra = serviceSortRank(a);
+            const rb = serviceSortRank(b);
+            if (ra !== rb) return ra - rb;
+            return a.name.localeCompare(b.name);
+          });
+
+          ws.send(JSON.stringify({ type: "services_list", sessionId, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: `list_services failed: ${err.message}` }));
+        }
+        return;
+      }
+
       // 2b) SET_CWD
       if (msg.type === "set_cwd") {
         const { sessionId, path } = msg.payload || {};
@@ -678,6 +762,7 @@ function setupWebSocket(server) {
           const session = await getSession(sessionId);
           const cwd = session?.cwd || "/";
           const wrappedCommand = `cd ${shQuote(cwd)} && ${command}`;
+          const execId = uuidv4();
 
           const auditLog = await prisma.auditLog.create({
             data: {
@@ -689,32 +774,62 @@ function setupWebSocket(server) {
             }
           });
 
-          ws.send(JSON.stringify({ type: "exec_start", sessionId, command, cwd }));
+          ws.send(JSON.stringify({ type: "exec_start", sessionId, execId, command, cwd }));
 
           conn.exec(wrappedCommand, { pty: true }, (err, stream) => {
             if (err) {
-              ws.send(JSON.stringify({ type: "error", message: `Exec failed: ${err.message}` }));
+              ws.send(JSON.stringify({ type: "error", execId, message: `Exec failed: ${err.message}` }));
               return;
             }
 
+            activeExecs.set(execId, { sessionId, stream, ws });
+
             stream.on("data", (data) => {
-              ws.send(JSON.stringify({ type: "stdout", sessionId, data: data.toString() }));
+              ws.send(JSON.stringify({ type: "stdout", sessionId, execId, data: data.toString() }));
             });
 
             stream.stderr.on("data", (data) => {
-              ws.send(JSON.stringify({ type: "stderr", sessionId, data: data.toString() }));
+              ws.send(JSON.stringify({ type: "stderr", sessionId, execId, data: data.toString() }));
             });
 
             stream.on("close", async (code, signal) => {
+              activeExecs.delete(execId);
               await prisma.auditLog.update({
                 where: { id: auditLog.id },
                 data: { status: "finished", exitCode: code, finishedAt: new Date() }
               });
-              ws.send(JSON.stringify({ type: "exec_end", sessionId, code, signal }));
+              ws.send(JSON.stringify({ type: "exec_end", sessionId, execId, code, signal }));
             });
           });
         } catch (err) {
           ws.send(JSON.stringify({ type: "error", message: err.message }));
+        }
+        return;
+      }
+
+      // 3b) EXEC_STOP
+      if (msg.type === "exec_stop") {
+        const { sessionId, execId } = msg.payload || {};
+        try {
+          const entry = activeExecs.get(execId);
+          if (!entry || entry.sessionId !== sessionId) throw new Error("Running command not found");
+
+          try {
+            entry.stream.signal?.("INT");
+          } catch {
+            // ignore
+          }
+
+          setTimeout(() => {
+            if (!activeExecs.has(execId)) return;
+            try {
+              entry.stream.close?.();
+            } catch {
+              try { entry.stream.end?.(); } catch { /* ignore */ }
+            }
+          }, 800);
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: `exec_stop failed: ${err.message}` }));
         }
         return;
       }

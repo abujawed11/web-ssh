@@ -24,7 +24,10 @@ export function useSSH() {
   const [dirPath, setDirPath] = useState("/");
   const [dirEntries, setDirEntries] = useState([]);
   const [dirLoading, setDirLoading] = useState(false);
+  const [servicesCache, setServicesCache] = useState([]);
+  const [isFetchingServices, setIsFetchingServices] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runningExecId, setRunningExecId] = useState(null);
   const [output, setOutput] = useState("");
   const [kiPrompt, setKiPrompt] = useState(null);
   
@@ -123,7 +126,10 @@ export function useSSH() {
       setDirPath("/");
       setDirEntries([]);
       setDirLoading(false);
+      setServicesCache([]);
+      setIsFetchingServices(false);
       setRunning(false);
+      setRunningExecId(null);
     };
 
     ws.onerror = () => {
@@ -134,6 +140,9 @@ export function useSSH() {
       sessionIdRef.current = null;
       connectionRef.current = null;
       cwdRef.current = "/";
+      setServicesCache([]);
+      setIsFetchingServices(false);
+      setRunningExecId(null);
       toast.error("WebSocket connection error");
     };
 
@@ -227,6 +236,7 @@ export function useSSH() {
           break;
         case "exec_start":
           setRunning(true);
+          setRunningExecId(msg.execId || null);
           if (msg.cwd) applyCwd(msg.cwd);
           setOutput((o) => {
             const prompt = buildPrompt(connectionRef.current, msg.cwd || cwdRef.current);
@@ -239,12 +249,19 @@ export function useSSH() {
           break;
         case "exec_end":
           setRunning(false);
+          setRunningExecId(null);
           setOutput(o => o + `\n[Exit ${msg.code ?? "?"}]\n`);
+          break;
+        case "services_list":
+          if (msg.sessionId && sessionIdRef.current && msg.sessionId !== sessionIdRef.current) break;
+          setServicesCache(Array.isArray(msg.entries) ? msg.entries : []);
+          setIsFetchingServices(false);
           break;
         case "error":
           setRunning(false);
           setDirLoading(false);
           if (!requestHandled) toast.error(msg.message);
+          setIsFetchingServices(false);
           break;
       }
     };
@@ -326,6 +343,17 @@ export function useSSH() {
     wsRef.current?.send(JSON.stringify({ type: "exec", payload: { sessionId: connectionState.sessionId, command } }));
   };
 
+  const stopExec = (execId) => {
+    if (!connectionState?.sessionId || !execId) return;
+    wsRef.current?.send(JSON.stringify({ type: "exec_stop", payload: { sessionId: connectionState.sessionId, execId } }));
+  };
+
+  const fetchServices = () => {
+    if (!connectionState?.sessionId) return;
+    setIsFetchingServices(true);
+    wsRef.current?.send(JSON.stringify({ type: "list_services", payload: { sessionId: connectionState.sessionId } }));
+  };
+
   const answerKI = (answers) => {
     wsRef.current?.send(JSON.stringify({ type: "ki_answer", payload: { answers } }));
     setKiPrompt(null);
@@ -338,7 +366,10 @@ export function useSSH() {
     dirPath,
     dirEntries,
     dirLoading,
+    servicesCache,
+    isFetchingServices,
     running,
+    runningExecId,
     output,
     kiPrompt,
     connectSSH,
@@ -354,6 +385,8 @@ export function useSSH() {
     readFile,
     writeFile,
     runCommand,
+    stopExec,
+    fetchServices,
     clearOutput: () => setOutput(""),
     answerKI
   };

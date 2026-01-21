@@ -101,6 +101,49 @@ export const TASK_GROUPS = [
     ],
   },
   {
+    id: "service-control",
+    title: "Service Control",
+    icon: Wrench,
+    description: "Interactive systemd runbooks (pick a service, then run actions).",
+    tasks: [
+      {
+        id: "svc-restart",
+        title: "Restart service",
+        tags: ["systemd", "service"],
+        requires: ["service"],
+        command: "sudo systemctl restart {{service}}",
+      },
+      {
+        id: "svc-status",
+        title: "Status",
+        tags: ["systemd", "service"],
+        requires: ["service"],
+        command: "sudo systemctl status {{service}} --no-pager",
+      },
+      {
+        id: "svc-follow-logs",
+        title: "Follow logs (stream)",
+        tags: ["systemd", "logs"],
+        requires: ["service"],
+        longRunning: true,
+        command: "sudo journalctl -u {{service}} -f --no-pager",
+      },
+      {
+        id: "svc-last-200",
+        title: "Last 200 logs",
+        tags: ["systemd", "logs"],
+        requires: ["service"],
+        command: "sudo journalctl -u {{service}} -n 200 --no-pager",
+      },
+      {
+        id: "svc-failed",
+        title: "Failed services",
+        tags: ["systemd", "debug"],
+        command: "sudo systemctl --failed --no-pager || true",
+      },
+    ],
+  },
+  {
     id: "nodejs",
     title: "Node.js",
     icon: TerminalSquare,
@@ -233,4 +276,3 @@ export function getDefaultGroupId() {
 export function findGroupById(id) {
   return TASK_GROUPS.find((g) => g.id === id) || null;
 }
-

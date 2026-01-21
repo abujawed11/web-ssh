@@ -27,12 +27,16 @@ export default function App() {
     dirPath,
     dirEntries,
     dirLoading,
+    servicesCache,
+    isFetchingServices,
     running,
+    runningExecId,
     output,
     kiPrompt,
     connectSSH,
     disconnectSSH,
     runCommand,
+    stopExec,
     clearOutput,
     listDir,
     setCwd,
@@ -44,6 +48,7 @@ export default function App() {
     movePath,
     readFile,
     writeFile,
+    fetchServices,
     answerKI
   } = useSSH();
 
@@ -121,6 +126,8 @@ export default function App() {
           <div className="lg:col-span-6 flex flex-col gap-6 min-h-0">
             <div className="h-[260px] min-h-0">
               <TaskWindow
+                key={connectionState?.sessionId || "no-session"}
+                sessionId={connectionState?.sessionId || null}
                 group={activeGroup}
                 connected={!!connectionState}
                 onSelectCommand={setSelectedCmd}
@@ -128,6 +135,9 @@ export default function App() {
                   setSelectedCmd(cmd);
                   runCommand(cmd);
                 }}
+                services={servicesCache}
+                servicesLoading={isFetchingServices}
+                onFetchServices={fetchServices}
               />
             </div>
 
@@ -150,6 +160,8 @@ export default function App() {
                     ? `${connectionState.username || "user"}@${connectionState.hostName || connectionState.host} — ${cwd || "/"}`
                     : "Not connected"
                 }
+                canStop={!!runningExecId}
+                onStop={() => stopExec(runningExecId)}
               />
             </div>
           </div>
