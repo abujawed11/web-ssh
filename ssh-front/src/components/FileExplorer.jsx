@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
+import { createPortal } from "react-dom";
 import {
   Folder,
   FileText,
@@ -31,6 +32,24 @@ function parentPath(path) {
   return parts.length ? `/${parts.join("/")}` : "/";
 }
 
+function clampMenuPosition(anchorX, anchorY, menuRect, padding = 8) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const w = menuRect?.width || 240;
+  const h = menuRect?.height || 220;
+
+  let x = anchorX;
+  let y = anchorY;
+
+  if (x + w + padding > vw) x = vw - w - padding;
+  if (y + h + padding > vh) y = vh - h - padding;
+
+  x = Math.max(padding, x);
+  y = Math.max(padding, y);
+
+  return { x, y };
+}
+
 export default function FileExplorer({
   connected,
   cwd,
@@ -50,7 +69,7 @@ export default function FileExplorer({
 }) {
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
-  const [menu, setMenu] = useState(null); // { x, y, target }
+  const [menu, setMenu] = useState(null); // { x, y, anchorX, anchorY, placed, target }
   const [clipboard, setClipboard] = useState(null); // { mode:'copy'|'cut', item:{name,type,path} }
   const [actionOpen, setActionOpen] = useState(false);
   const [actionKind, setActionKind] = useState(null); // new_dir | new_file | rename
@@ -225,11 +244,11 @@ export default function FileExplorer({
 
     if (target) setSelected(target);
     const padding = 8;
-    const width = 240;
-    const height = target ? 184 : 112;
-    const x = Math.min(e.clientX, window.innerWidth - width - padding);
-    const y = Math.min(e.clientY, window.innerHeight - height - padding);
-    setMenu({ x, y, target: target || null });
+    const approxWidth = 240;
+    const approxHeight = target ? 320 : 140;
+    const x = Math.min(e.clientX, window.innerWidth - approxWidth - padding);
+    const y = Math.min(e.clientY, window.innerHeight - approxHeight - padding);
+    setMenu({ x, y, anchorX: e.clientX, anchorY: e.clientY, placed: false, target: target || null });
   };
 
   const ctxTarget = menu?.target || null;
@@ -399,101 +418,106 @@ export default function FileExplorer({
         )}
       </div>
 
-      {menu && (
-        <div
-          className="fixed z-50 w-[240px] rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden"
-          style={{ left: menu.x, top: menu.y }}
-          onClick={(e) => e.stopPropagation()}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <div className="p-2 border-b border-slate-700 bg-slate-800/40">
-            <div className="text-xs text-slate-300 truncate" title={ctxTarget?.path || currentPath}>
-              {ctxTarget?.name || currentPath}
+      {menu &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={(node) => {
+              if (!node || !menu || menu.placed) return;
+              const rect = node.getBoundingClientRect();
+              const pos = clampMenuPosition(menu.anchorX ?? menu.x, menu.anchorY ?? menu.y, rect, 8);
+              setMenu((m) => (m ? { ...m, ...pos, placed: true } : m));
+            }}
+            className="fixed z-[1000] w-[240px] rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden"
+            style={{ left: menu.x, top: menu.y }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div className="p-2 border-b border-slate-700 bg-slate-800/40">
+              <div className="text-xs text-slate-300 truncate" title={ctxTarget?.path || currentPath}>
+                {ctxTarget?.name || currentPath}
+              </div>
+              {ctxTarget?.path && <div className="text-[10px] text-slate-500 truncate">{ctxTarget.path}</div>}
             </div>
-            {ctxTarget?.path && (
-              <div className="text-[10px] text-slate-500 truncate">{ctxTarget.path}</div>
-            )}
-          </div>
 
-          <div className="p-1">
-            {ctxTarget ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(null);
-                    if (ctxIsDir) onSetCwd(ctxTarget.path);
-                    else if (ctxIsFile) openEditor(ctxTarget.path);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
-                >
-                  <Pencil className="w-4 h-4 text-slate-400" />
-                  {ctxIsDir ? "Open" : "Open editor"}
-                </button>
+            <div className="p-1">
+              {ctxTarget ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      if (ctxIsDir) onSetCwd(ctxTarget.path);
+                      else if (ctxIsFile) openEditor(ctxTarget.path);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
+                  >
+                    <Pencil className="w-4 h-4 text-slate-400" />
+                    {ctxIsDir ? "Open" : "Open editor"}
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(null);
-                    setClipboardMode("copy", ctxTarget);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
-                >
-                  <Copy className="w-4 h-4 text-slate-400" />
-                  Copy
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      setClipboardMode("copy", ctxTarget);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
+                  >
+                    <Copy className="w-4 h-4 text-slate-400" />
+                    Copy
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(null);
-                    setClipboardMode("cut", ctxTarget);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
-                >
-                  <Scissors className="w-4 h-4 text-slate-400" />
-                  Cut
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      setClipboardMode("cut", ctxTarget);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
+                  >
+                    <Scissors className="w-4 h-4 text-slate-400" />
+                    Cut
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(null);
-                    openPrompt("rename", ctxTarget.name);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
-                >
-                  <TextCursorInput className="w-4 h-4 text-slate-400" />
-                  Rename
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      openPrompt("rename", ctxTarget.name);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-slate-200 flex items-center gap-2"
+                  >
+                    <TextCursorInput className="w-4 h-4 text-slate-400" />
+                    Rename
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(null);
-                    pasteClipboard(ctxPasteDir);
-                  }}
-                  disabled={!clipboard || actionBusy}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-sm text-slate-200 flex items-center gap-2"
-                >
-                  <ClipboardPaste className="w-4 h-4 text-slate-400" />
-                  Paste
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      pasteClipboard(ctxPasteDir);
+                    }}
+                    disabled={!clipboard || actionBusy}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-sm text-slate-200 flex items-center gap-2"
+                  >
+                    <ClipboardPaste className="w-4 h-4 text-slate-400" />
+                    Paste
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenu(null);
-                    doDelete(ctxTarget);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-500/10 text-sm text-red-300 flex items-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete
-                </button>
-              </>
-            ) : (
-              <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenu(null);
+                      doDelete(ctxTarget);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-500/10 text-sm text-red-300 flex items-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete
+                  </button>
+                </>
+              ) : (
                 <button
                   type="button"
                   onClick={() => {
@@ -506,11 +530,11 @@ export default function FileExplorer({
                   <ClipboardPaste className="w-4 h-4 text-slate-400" />
                   Paste
                 </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
 
       <SessionModal
         open={actionOpen}
