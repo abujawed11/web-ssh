@@ -1,6 +1,7 @@
 const { WebSocketServer } = require("ws");
 const { Client } = require("ssh2");
 const { v4: uuidv4 } = require("uuid");
+const logger = require("./logger");
 
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server });
@@ -11,7 +12,7 @@ function setupWebSocket(server) {
     ws.ssh = null;
     ws.isReady = false;
 
-    console.log(`[WS] Connection received: ${id}`);
+    logger.info(`[WS] Connection received`, { id });
     ws.send(JSON.stringify({ type: "server", message: `WS connected (${id})` }));
 
     ws.on("message", async (raw) => {
@@ -19,12 +20,12 @@ function setupWebSocket(server) {
       try {
         msg = JSON.parse(raw.toString());
       } catch {
-        console.log(`[WS] ${id} - Error: Invalid JSON received`);
+        logger.error(`[WS] Invalid JSON received`, { id });
         ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
         return;
       }
 
-      console.log(`[WS] ${id} - Received: ${msg.type}`);
+      logger.info(`[WS] Received message`, { id, type: msg.type });
 
       // 1) CONNECT
       if (msg.type === "connect") {
@@ -46,21 +47,22 @@ function setupWebSocket(server) {
 
         conn
           .on("ready", () => {
-            console.log(`[WS] ${id} - SSH Ready`);
+            logger.info(`[WS] SSH Ready`, { id, host, username });
             ws.isReady = true;
             ws.send(JSON.stringify({ type: "status", status: "connected" }));
           })
           .on("error", (err) => {
-            console.error(`[WS] ${id} - SSH Error: ${err.message}`);
+            logger.error(`[WS] SSH Error`, { id, error: err.message });
             ws.isReady = false;
             ws.send(JSON.stringify({ type: "error", message: `SSH error: ${err.message}` }));
           })
           .on("close", () => {
-            console.log(`[WS] ${id} - SSH Closed`);
+            logger.info(`[WS] SSH Closed`, { id });
             ws.isReady = false;
             ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
           });
 
+        logger.info(`[WS] Connecting SSH...`, { id, host, username });
         conn.connect({
           host,
           port,
@@ -87,10 +89,12 @@ function setupWebSocket(server) {
           return;
         }
 
+        logger.info(`[WS] Executing command`, { id, command });
         ws.send(JSON.stringify({ type: "exec_start", command }));
 
         ws.ssh.exec(command, { pty: true }, (err, stream) => {
           if (err) {
+            logger.error(`[WS] Exec failed`, { id, error: err.message });
             ws.send(JSON.stringify({ type: "error", message: `Exec failed: ${err.message}` }));
             return;
           }
@@ -104,6 +108,7 @@ function setupWebSocket(server) {
           });
 
           stream.on("close", (code, signal) => {
+            logger.info(`[WS] Command finished`, { id, code, signal });
             ws.send(JSON.stringify({ type: "exec_end", code, signal }));
           });
         });
@@ -125,7 +130,7 @@ function setupWebSocket(server) {
     });
 
     ws.on("close", () => {
-      console.log(`[WS] Disconnected: ${id}`);
+      logger.info(`[WS] Disconnected`, { id });
       if (ws.ssh) {
         try { ws.ssh.end(); } catch {}
       }
