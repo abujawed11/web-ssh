@@ -96,6 +96,180 @@ function classifySftpEntry(attrs) {
   return "other";
 }
 
+function clampStringSize(str, maxBytes) {
+  const buf = Buffer.from(String(str ?? ""), "utf8");
+  if (buf.length <= maxBytes) return buf.toString("utf8");
+  return buf.subarray(0, maxBytes).toString("utf8");
+}
+
+function sftpStat(sftp, path) {
+  return new Promise((resolve, reject) => {
+    sftp.stat(path, (err, stats) => {
+      if (err) return reject(err);
+      resolve(stats);
+    });
+  });
+}
+
+function sftpMkdir(sftp, path) {
+  return new Promise((resolve, reject) => {
+    sftp.mkdir(path, (err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
+function sftpOpen(sftp, path, flags) {
+  return new Promise((resolve, reject) => {
+    sftp.open(path, flags, (err, handle) => {
+      if (err) return reject(err);
+      resolve(handle);
+    });
+  });
+}
+
+function sftpClose(sftp, handle) {
+  return new Promise((resolve, reject) => {
+    sftp.close(handle, (err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
+function sftpRead(sftp, handle, length, position) {
+  return new Promise((resolve, reject) => {
+    if (length < 0) return reject(new Error("Invalid read length"));
+    const buffer = Buffer.allocUnsafe(length);
+    sftp.read(handle, buffer, 0, length, position, (err, bytesRead, buf) => {
+      if (err) return reject(err);
+      resolve(buf.subarray(0, bytesRead));
+    });
+  });
+}
+
+function sftpWriteAll(sftp, handle, data) {
+  return new Promise((resolve, reject) => {
+    const buffer = Buffer.isBuffer(data) ? data : Buffer.from(String(data ?? ""), "utf8");
+    let offset = 0;
+
+    const writeNext = () => {
+      if (offset >= buffer.length) return resolve();
+      sftp.write(handle, buffer, offset, buffer.length - offset, offset, (err, bytesWritten) => {
+        if (err) return reject(err);
+        offset += bytesWritten;
+        writeNext();
+      });
+    };
+
+    writeNext();
+  });
+}
+
+function sftpRename(sftp, from, to) {
+  return new Promise((resolve, reject) => {
+    sftp.rename(from, to, (err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
+function sftpUnlink(sftp, path) {
+  return new Promise((resolve, reject) => {
+    sftp.unlink(path, (err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
+function sftpRmdir(sftp, path) {
+  return new Promise((resolve, reject) => {
+    sftp.rmdir(path, (err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
+
+function sftpReaddir(sftp, path) {
+  return new Promise((resolve, reject) => {
+    sftp.readdir(path, (err, list) => {
+      if (err) return reject(err);
+      resolve(list || []);
+    });
+  });
+}
+
+async function sftpEnsureDir(sftp, path) {
+  try {
+    await sftpMkdir(sftp, path);
+  } catch (err) {
+    // If it already exists, accept it.
+    const stats = await sftpStat(sftp, path);
+    if (!stats.isDirectory?.()) throw err;
+  }
+}
+
+async function sftpCopyFile(sftp, from, to) {
+  const stats = await sftpStat(sftp, from);
+  if (!stats.isFile?.()) throw new Error("Source is not a file");
+
+  const readHandle = await sftpOpen(sftp, from, "r");
+  const writeHandle = await sftpOpen(sftp, to, "w");
+
+  try {
+    const chunkSize = 64 * 1024;
+    let position = 0;
+    const size = typeof stats.size === "number" ? stats.size : 0;
+
+    while (position < size) {
+      const len = Math.min(chunkSize, size - position);
+      const buf = await sftpRead(sftp, readHandle, len, position);
+      await new Promise((resolve, reject) => {
+        sftp.write(writeHandle, buf, 0, buf.length, position, (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+      position += buf.length;
+      if (buf.length === 0) break;
+    }
+  } finally {
+    await sftpClose(sftp, readHandle);
+    await sftpClose(sftp, writeHandle);
+  }
+}
+
+async function sftpCopyDirRecursive(sftp, fromDir, toDir, depth = 0) {
+  if (depth > 32) throw new Error("Max copy depth exceeded");
+
+  const stats = await sftpStat(sftp, fromDir);
+  if (!stats.isDirectory?.()) throw new Error("Source is not a directory");
+
+  await sftpEnsureDir(sftp, toDir);
+  const list = await sftpReaddir(sftp, fromDir);
+
+  for (const entry of list) {
+    const name = entry.filename;
+    if (!name || name === "." || name === "..") continue;
+
+    const from = `${fromDir.replace(/\/+$/g, "")}/${name}`;
+    const to = `${toDir.replace(/\/+$/g, "")}/${name}`;
+
+    const type = classifySftpEntry(entry.attrs);
+    if (type === "dir") {
+      await sftpCopyDirRecursive(sftp, from, to, depth + 1);
+    } else if (type === "file") {
+      await sftpCopyFile(sftp, from, to);
+    } else {
+      throw new Error(`Unsupported entry type during copy: ${type} (${name})`);
+    }
+  }
+}
+
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server });
 
@@ -110,6 +284,14 @@ function setupWebSocket(server) {
       } catch {
         return;
       }
+
+      const replyOk = (payload) => {
+        ws.send(JSON.stringify({ type: "ok", reqId: msg.reqId || null, ...payload }));
+      };
+
+      const replyError = (message) => {
+        ws.send(JSON.stringify({ type: "error", reqId: msg.reqId || null, message }));
+      };
 
       // 0) AUTH
       if (msg.type === "auth") {
@@ -303,6 +485,187 @@ function setupWebSocket(server) {
           ws.send(JSON.stringify({ type: "dir_list", sessionId, path: requestedPath, entries }));
         } catch (err) {
           ws.send(JSON.stringify({ type: "error", message: `list_dir failed: ${err.message}` }));
+        }
+        return;
+      }
+
+      // 2d) MKDIR
+      if (msg.type === "mkdir") {
+        const { sessionId, path } = msg.payload || {};
+        try {
+          const dirPath = normalizePosixAbsolutePath(path);
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+          await sftpMkdir(sftp, dirPath);
+          replyOk({ sessionId, action: "mkdir", path: dirPath });
+        } catch (err) {
+          replyError(`mkdir failed: ${err.message}`);
+        }
+        return;
+      }
+
+      // 2e) CREATE_FILE (empty)
+      if (msg.type === "create_file") {
+        const { sessionId, path } = msg.payload || {};
+        try {
+          const filePath = normalizePosixAbsolutePath(path);
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+          const handle = await sftpOpen(sftp, filePath, "w");
+          await sftpClose(sftp, handle);
+          replyOk({ sessionId, action: "create_file", path: filePath });
+        } catch (err) {
+          replyError(`create_file failed: ${err.message}`);
+        }
+        return;
+      }
+
+      // 2f) READ_FILE (text)
+      if (msg.type === "read_file") {
+        const { sessionId, path } = msg.payload || {};
+        try {
+          const filePath = normalizePosixAbsolutePath(path);
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+
+          const stats = await sftpStat(sftp, filePath);
+          if (!stats.isFile?.()) throw new Error("Not a regular file");
+
+          const maxBytes = 512 * 1024; // 512KB
+          if (typeof stats.size === "number" && stats.size > maxBytes) {
+            throw new Error("File too large to open in editor (limit 512KB)");
+          }
+
+          const handle = await sftpOpen(sftp, filePath, "r");
+          const size = typeof stats.size === "number" ? stats.size : maxBytes;
+          const toRead = Math.min(size, maxBytes);
+          const data = toRead > 0 ? await sftpRead(sftp, handle, toRead, 0) : Buffer.alloc(0);
+          await sftpClose(sftp, handle);
+
+          ws.send(JSON.stringify({
+            type: "file",
+            reqId: msg.reqId || null,
+            sessionId,
+            path: filePath,
+            content: data.toString("utf8"),
+          }));
+        } catch (err) {
+          replyError(`read_file failed: ${err.message}`);
+        }
+        return;
+      }
+
+      // 2g) WRITE_FILE (text)
+      if (msg.type === "write_file") {
+        const { sessionId, path, content } = msg.payload || {};
+        try {
+          const filePath = normalizePosixAbsolutePath(path);
+          const text = clampStringSize(content, 512 * 1024);
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+
+          const handle = await sftpOpen(sftp, filePath, "w");
+          await sftpWriteAll(sftp, handle, text);
+          await sftpClose(sftp, handle);
+
+          replyOk({ sessionId, action: "write_file", path: filePath });
+        } catch (err) {
+          replyError(`write_file failed: ${err.message}`);
+        }
+        return;
+      }
+
+      // 2h) RENAME
+      if (msg.type === "rename_path") {
+        const { sessionId, from, to } = msg.payload || {};
+        try {
+          const fromPath = normalizePosixAbsolutePath(from);
+          const toPath = normalizePosixAbsolutePath(to);
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+          await sftpRename(sftp, fromPath, toPath);
+          replyOk({ sessionId, action: "rename_path", from: fromPath, to: toPath });
+        } catch (err) {
+          replyError(`rename failed: ${err.message}`);
+        }
+        return;
+      }
+
+      // 2i) DELETE (file or empty dir)
+      if (msg.type === "delete_path") {
+        const { sessionId, path } = msg.payload || {};
+        try {
+          const targetPath = normalizePosixAbsolutePath(path);
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+          const stats = await sftpStat(sftp, targetPath);
+
+          if (stats.isDirectory?.()) {
+            await sftpRmdir(sftp, targetPath);
+          } else {
+            await sftpUnlink(sftp, targetPath);
+          }
+
+          replyOk({ sessionId, action: "delete_path", path: targetPath });
+        } catch (err) {
+          replyError(`delete failed: ${err.message}`);
+        }
+        return;
+      }
+
+      // 2j) COPY_PATH (file or dir)
+      if (msg.type === "copy_path") {
+        const { sessionId, from, toDir, name } = msg.payload || {};
+        try {
+          const fromPath = normalizePosixAbsolutePath(from);
+          const destDir = normalizePosixAbsolutePath(toDir);
+          const destName = String(name || "").trim() || fromPath.split("/").filter(Boolean).slice(-1)[0];
+          if (!destName || destName.includes("/") || destName.includes("\\")) throw new Error("Invalid destination name");
+          const toPath = `${destDir.replace(/\/+$/g, "")}/${destName}`;
+
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+
+          const stats = await sftpStat(sftp, fromPath);
+          if (stats.isDirectory?.()) {
+            await sftpCopyDirRecursive(sftp, fromPath, toPath);
+          } else if (stats.isFile?.()) {
+            await sftpCopyFile(sftp, fromPath, toPath);
+          } else {
+            throw new Error("Unsupported source type");
+          }
+
+          replyOk({ sessionId, action: "copy_path", from: fromPath, to: toPath });
+        } catch (err) {
+          replyError(`copy failed: ${err.message}`);
+        }
+        return;
+      }
+
+      // 2k) MOVE_PATH (rename; fallback to mv)
+      if (msg.type === "move_path") {
+        const { sessionId, from, toDir, name } = msg.payload || {};
+        try {
+          const fromPath = normalizePosixAbsolutePath(from);
+          const destDir = normalizePosixAbsolutePath(toDir);
+          const destName = String(name || "").trim() || fromPath.split("/").filter(Boolean).slice(-1)[0];
+          if (!destName || destName.includes("/") || destName.includes("\\")) throw new Error("Invalid destination name");
+          const toPath = `${destDir.replace(/\/+$/g, "")}/${destName}`;
+
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const sftp = await getOrCreateSftp(sessionId, conn);
+
+          try {
+            await sftpRename(sftp, fromPath, toPath);
+          } catch {
+            // Fallback to shell mv (handles cross-device moves)
+            const { code, stderr } = await execOnce(conn, `mv ${shQuote(fromPath)} ${shQuote(toPath)} 2>&1`);
+            if (code !== 0) throw new Error(stderr || "Move failed");
+          }
+
+          replyOk({ sessionId, action: "move_path", from: fromPath, to: toPath });
+        } catch (err) {
+          replyError(`move failed: ${err.message}`);
         }
         return;
       }

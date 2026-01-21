@@ -34,6 +34,26 @@ export function useSSH() {
   const sessionIdRef = useRef(null);
   const connectionRef = useRef(null);
   const cwdRef = useRef("/");
+  const pendingReqRef = useRef(new Map());
+
+  const request = useCallback((type, payload) => {
+    const sessionId = payload?.sessionId ?? sessionIdRef.current;
+    if (!sessionId) return Promise.reject(new Error("Not connected"));
+    if (!wsRef.current || wsRef.current.readyState !== 1) return Promise.reject(new Error("WebSocket not ready"));
+
+    const reqId = crypto.randomUUID();
+    const message = { type, reqId, payload: { ...payload, sessionId } };
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pendingReqRef.current.delete(reqId);
+        reject(new Error("Request timed out"));
+      }, 15000);
+
+      pendingReqRef.current.set(reqId, { resolve, reject, timeout });
+      wsRef.current.send(JSON.stringify(message));
+    });
+  }, []);
 
   const applyConnection = useCallback((next) => {
     connectionRef.current = next;
@@ -123,6 +143,20 @@ export function useSSH() {
         msg = JSON.parse(ev.data);
       } catch { return; }
 
+      let requestHandled = false;
+      if (msg?.reqId && pendingReqRef.current.has(msg.reqId)) {
+        const pending = pendingReqRef.current.get(msg.reqId);
+        clearTimeout(pending.timeout);
+        pendingReqRef.current.delete(msg.reqId);
+        requestHandled = true;
+
+        if (msg.type === "error") {
+          pending.reject(new Error(msg.message || "Request failed"));
+        } else {
+          pending.resolve(msg);
+        }
+      }
+
       switch (msg.type) {
         case "auth_ok":
           console.log("WS Auth Successful");
@@ -210,7 +244,7 @@ export function useSSH() {
         case "error":
           setRunning(false);
           setDirLoading(false);
-          toast.error(msg.message);
+          if (!requestHandled) toast.error(msg.message);
           break;
       }
     };
@@ -261,6 +295,18 @@ export function useSSH() {
     }
   };
 
+  const mkdir = (path) => request("mkdir", { path });
+  const createFile = (path) => request("create_file", { path });
+  const renamePath = (from, to) => request("rename_path", { from, to });
+  const deletePath = (path) => request("delete_path", { path });
+  const copyPath = (from, toDir, name) => request("copy_path", { from, toDir, ...(name ? { name } : {}) });
+  const movePath = (from, toDir, name) => request("move_path", { from, toDir, ...(name ? { name } : {}) });
+  const readFile = async (path) => {
+    const res = await request("read_file", { path });
+    return { path: res.path, content: res.content };
+  };
+  const writeFile = (path, content) => request("write_file", { path, content });
+
   const disconnectSSH = () => {
     if (connectionState?.sessionId) {
       wsRef.current?.send(JSON.stringify({ type: "disconnect", payload: { sessionId: connectionState.sessionId } }));
@@ -299,6 +345,14 @@ export function useSSH() {
     disconnectSSH,
     listDir,
     setCwd: setCwdRemote,
+    mkdir,
+    createFile,
+    renamePath,
+    deletePath,
+    copyPath,
+    movePath,
+    readFile,
+    writeFile,
     runCommand,
     clearOutput: () => setOutput(""),
     answerKI

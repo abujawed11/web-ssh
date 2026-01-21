@@ -36,6 +36,14 @@ export default function App() {
     clearOutput,
     listDir,
     setCwd,
+    mkdir,
+    createFile,
+    renamePath,
+    deletePath,
+    copyPath,
+    movePath,
+    readFile,
+    writeFile,
     answerKI
   } = useSSH();
 
@@ -90,6 +98,22 @@ export default function App() {
               loading={dirLoading}
               onSetCwd={setCwd}
               onRefresh={() => listDir(dirPath)}
+              onMkdir={async (path) => {
+                await mkdir(path);
+              }}
+              onCreateFile={async (path) => {
+                await createFile(path);
+              }}
+              onRename={async (from, to) => {
+                await renamePath(from, to);
+              }}
+              onDelete={async (path) => {
+                await deletePath(path);
+              }}
+              onCopyPath={copyPath}
+              onMovePath={movePath}
+              onReadFile={readFile}
+              onWriteFile={writeFile}
             />
           </div>
 
