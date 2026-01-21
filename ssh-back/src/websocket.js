@@ -59,6 +59,49 @@ function execOnce(conn, command) {
   });
 }
 
+function execOnceWithInput(conn, command, input) {
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+
+    conn.exec(command, { pty: false }, (err, stream) => {
+      if (err) return reject(err);
+
+      stream.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      stream.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+
+      stream.on("close", (code, signal) => {
+        resolve({ stdout, stderr, code, signal });
+      });
+
+      if (input != null) {
+        stream.end(Buffer.isBuffer(input) ? input : Buffer.from(String(input), "utf8"));
+      } else {
+        stream.end();
+      }
+    });
+  });
+}
+
+function isSftpPermissionDenied(err) {
+  const msg = String(err?.message || "");
+  return err?.code === 3 || err?.code === "EACCES" || /permission denied/i.test(msg);
+}
+
+function sudoFailureToMessage(stderr) {
+  const msg = String(stderr || "").trim();
+  if (/sudo:\s*a password is required/i.test(msg) || /sudo:\s*no tty present/i.test(msg)) {
+    return "Permission denied. This operation needs sudo, but this app can only use non-interactive sudo (NOPASSWD). Either use the Terminal, or configure NOPASSWD sudo for this user.";
+  }
+  if (/sudo:\s*command not found/i.test(msg)) return "sudo not found on the remote host.";
+  return msg || "sudo command failed";
+}
+
 async function determineInitialCwd(conn, username) {
   const home = `/home/${username}`;
   const cmd = `if [ -d ${shQuote(home)} ]; then printf %s ${shQuote(home)}; else printf %s /; fi`;
@@ -704,7 +747,13 @@ function setupWebSocket(server) {
           const dirPath = normalizePosixAbsolutePath(path);
           const conn = await getOrConnectSSH(sessionId, ws);
           const sftp = await getOrCreateSftp(sessionId, conn);
-          await sftpMkdir(sftp, dirPath);
+          try {
+            await sftpMkdir(sftp, dirPath);
+          } catch (err) {
+            if (!isSftpPermissionDenied(err)) throw err;
+            const { code, stderr } = await execOnce(conn, `sudo -n mkdir -p -- ${shQuote(dirPath)}`);
+            if (code !== 0) throw new Error(sudoFailureToMessage(stderr));
+          }
           replyOk({ sessionId, action: "mkdir", path: dirPath });
         } catch (err) {
           replyError(`mkdir failed: ${err.message}`);
@@ -719,8 +768,15 @@ function setupWebSocket(server) {
           const filePath = normalizePosixAbsolutePath(path);
           const conn = await getOrConnectSSH(sessionId, ws);
           const sftp = await getOrCreateSftp(sessionId, conn);
-          const handle = await sftpOpen(sftp, filePath, "w");
-          await sftpClose(sftp, handle);
+          try {
+            const handle = await sftpOpen(sftp, filePath, "w");
+            await sftpClose(sftp, handle);
+          } catch (err) {
+            if (!isSftpPermissionDenied(err)) throw err;
+            const cmd = `sudo -n sh -lc 'umask 022; : > \"$1\"' _ ${shQuote(filePath)}`;
+            const { code, stderr } = await execOnce(conn, cmd);
+            if (code !== 0) throw new Error(sudoFailureToMessage(stderr));
+          }
           replyOk({ sessionId, action: "create_file", path: filePath });
         } catch (err) {
           replyError(`create_file failed: ${err.message}`);
@@ -736,26 +792,35 @@ function setupWebSocket(server) {
           const conn = await getOrConnectSSH(sessionId, ws);
           const sftp = await getOrCreateSftp(sessionId, conn);
 
-          const stats = await sftpStat(sftp, filePath);
-          if (!stats.isFile?.()) throw new Error("Not a regular file");
-
           const maxBytes = 512 * 1024; // 512KB
-          if (typeof stats.size === "number" && stats.size > maxBytes) {
-            throw new Error("File too large to open in editor (limit 512KB)");
-          }
+          let contentBuf = null;
 
-          const handle = await sftpOpen(sftp, filePath, "r");
-          const size = typeof stats.size === "number" ? stats.size : maxBytes;
-          const toRead = Math.min(size, maxBytes);
-          const data = toRead > 0 ? await sftpRead(sftp, handle, toRead, 0) : Buffer.alloc(0);
-          await sftpClose(sftp, handle);
+          try {
+            const stats = await sftpStat(sftp, filePath);
+            if (!stats.isFile?.()) throw new Error("Not a regular file");
+            if (typeof stats.size === "number" && stats.size > maxBytes) {
+              throw new Error("File too large to open in editor (limit 512KB)");
+            }
+
+            const handle = await sftpOpen(sftp, filePath, "r");
+            const size = typeof stats.size === "number" ? stats.size : maxBytes;
+            const toRead = Math.min(size, maxBytes);
+            contentBuf = toRead > 0 ? await sftpRead(sftp, handle, toRead, 0) : Buffer.alloc(0);
+            await sftpClose(sftp, handle);
+          } catch (err) {
+            if (!isSftpPermissionDenied(err)) throw err;
+            const cmd = `sudo -n sh -lc 'p=\"$1\"; [ -f \"$p\" ] || { echo \"Not a regular file\" 1>&2; exit 2; }; sz=$(wc -c < \"$p\" 2>/dev/null || echo 0); [ \"$sz\" -le ${maxBytes} ] || { echo \"File too large to open in editor (limit 512KB)\" 1>&2; exit 3; }; cat -- \"$p\"' _ ${shQuote(filePath)}`;
+            const { stdout, stderr, code } = await execOnce(conn, cmd);
+            if (code !== 0) throw new Error(sudoFailureToMessage(stderr));
+            contentBuf = Buffer.from(String(stdout ?? ""), "utf8");
+          }
 
           ws.send(JSON.stringify({
             type: "file",
             reqId: msg.reqId || null,
             sessionId,
             path: filePath,
-            content: data.toString("utf8"),
+            content: (contentBuf || Buffer.alloc(0)).toString("utf8"),
           }));
         } catch (err) {
           replyError(`read_file failed: ${err.message}`);
@@ -772,9 +837,15 @@ function setupWebSocket(server) {
           const conn = await getOrConnectSSH(sessionId, ws);
           const sftp = await getOrCreateSftp(sessionId, conn);
 
-          const handle = await sftpOpen(sftp, filePath, "w");
-          await sftpWriteAll(sftp, handle, text);
-          await sftpClose(sftp, handle);
+          try {
+            const handle = await sftpOpen(sftp, filePath, "w");
+            await sftpWriteAll(sftp, handle, text);
+            await sftpClose(sftp, handle);
+          } catch (err) {
+            if (!isSftpPermissionDenied(err)) throw err;
+            const { code, stderr } = await execOnceWithInput(conn, `sudo -n tee ${shQuote(filePath)} >/dev/null`, text);
+            if (code !== 0) throw new Error(sudoFailureToMessage(stderr));
+          }
 
           replyOk({ sessionId, action: "write_file", path: filePath });
         } catch (err) {
@@ -791,7 +862,13 @@ function setupWebSocket(server) {
           const toPath = normalizePosixAbsolutePath(to);
           const conn = await getOrConnectSSH(sessionId, ws);
           const sftp = await getOrCreateSftp(sessionId, conn);
-          await sftpRename(sftp, fromPath, toPath);
+          try {
+            await sftpRename(sftp, fromPath, toPath);
+          } catch (err) {
+            if (!isSftpPermissionDenied(err)) throw err;
+            const { code, stderr } = await execOnce(conn, `sudo -n mv -- ${shQuote(fromPath)} ${shQuote(toPath)}`);
+            if (code !== 0) throw new Error(sudoFailureToMessage(stderr));
+          }
           replyOk({ sessionId, action: "rename_path", from: fromPath, to: toPath });
         } catch (err) {
           replyError(`rename failed: ${err.message}`);
@@ -806,12 +883,18 @@ function setupWebSocket(server) {
           const targetPath = normalizePosixAbsolutePath(path);
           const conn = await getOrConnectSSH(sessionId, ws);
           const sftp = await getOrCreateSftp(sessionId, conn);
-          const stats = await sftpStat(sftp, targetPath);
-
-          if (stats.isDirectory?.()) {
-            await sftpRmdir(sftp, targetPath);
-          } else {
-            await sftpUnlink(sftp, targetPath);
+          try {
+            const stats = await sftpStat(sftp, targetPath);
+            if (stats.isDirectory?.()) {
+              await sftpRmdir(sftp, targetPath);
+            } else {
+              await sftpUnlink(sftp, targetPath);
+            }
+          } catch (err) {
+            if (!isSftpPermissionDenied(err)) throw err;
+            const cmd = `sudo -n sh -lc 'p=\"$1\"; if [ -d \"$p\" ]; then rmdir -- \"$p\"; else rm -f -- \"$p\"; fi' _ ${shQuote(targetPath)}`;
+            const { code, stderr } = await execOnce(conn, cmd);
+            if (code !== 0) throw new Error(sudoFailureToMessage(stderr));
           }
 
           replyOk({ sessionId, action: "delete_path", path: targetPath });
