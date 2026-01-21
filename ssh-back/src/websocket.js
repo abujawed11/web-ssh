@@ -2,138 +2,173 @@ const { WebSocketServer } = require("ws");
 const { Client } = require("ssh2");
 const { v4: uuidv4 } = require("uuid");
 const logger = require("./logger");
+const prisma = require("./db");
+const { verifyToken } = require("./auth");
+const { createSession, getSession, deleteSession, getOrConnectSSH, activeConnections } = require("./sessionManager");
+const { encrypt, decrypt } = require("./crypto");
 
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server });
 
-  // Each WS connection manages one SSH client for MVP
   wss.on("connection", (ws) => {
-    const id = uuidv4();
-    ws.ssh = null;
-    ws.isReady = false;
-
-    logger.info(`[WS] Connection received`, { id });
-    ws.send(JSON.stringify({ type: "server", message: `WS connected (${id})` }));
+    ws.userId = null;
+    ws.sessions = new Set(); // Track sessions for this WS
 
     ws.on("message", async (raw) => {
       let msg;
       try {
         msg = JSON.parse(raw.toString());
       } catch {
-        logger.error(`[WS] Invalid JSON received`, { id });
-        ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
         return;
       }
 
-      logger.info(`[WS] Received message`, { id, type: msg.type });
+      // 0) AUTH
+      if (msg.type === "auth") {
+        const decoded = verifyToken(msg.token);
+        if (decoded) {
+          ws.userId = decoded.userId;
+          ws.send(JSON.stringify({ type: "auth_ok" }));
+        } else {
+          ws.send(JSON.stringify({ type: "error", message: "Invalid token" }));
+        }
+        return;
+      }
 
       // 1) CONNECT
       if (msg.type === "connect") {
-        const { host, port = 22, username, password } = msg.payload || {};
-        if (!host || !username || !password) {
-          ws.send(JSON.stringify({ type: "error", message: "host/username/password required" }));
-          return;
-        }
-
-        // Close any previous session
-        if (ws.ssh) {
-          try { ws.ssh.end(); } catch {}
-          ws.ssh = null;
-          ws.isReady = false;
+        const { host, port = 22, username, password, privateKey, passphrase, saveProfile, profileName } = msg.payload || {};
+        
+        let authType = "password";
+        let secret = password;
+        if (privateKey) {
+          authType = "key";
+          secret = privateKey; // We'll store key as secret, maybe combine with passphrase if needed
         }
 
         const conn = new Client();
-        ws.ssh = conn;
-
-        conn
-          .on("ready", () => {
-            logger.info(`[WS] SSH Ready`, { id, host, username });
-            ws.isReady = true;
-            ws.send(JSON.stringify({ type: "status", status: "connected" }));
-          })
-          .on("error", (err) => {
-            logger.error(`[WS] SSH Error`, { id, error: err.message });
-            ws.isReady = false;
-            ws.send(JSON.stringify({ type: "error", message: `SSH error: ${err.message}` }));
-          })
-          .on("close", () => {
-            logger.info(`[WS] SSH Closed`, { id });
-            ws.isReady = false;
-            ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
+        
+        conn.on("keyboard-interactive", (name, instructions, lang, prompts, finish) => {
+          ws.send(JSON.stringify({ 
+            type: "ki_prompt", 
+            payload: { name, instructions, prompts: prompts.map(p => ({ prompt: p.prompt, echo: p.echo })) } 
+          }));
+          
+          ws.once("ki_answer", (answerMsg) => {
+            const parsed = JSON.parse(answerMsg.toString());
+            finish(parsed.payload.answers);
           });
-
-        logger.info(`[WS] Connecting SSH...`, { id, host, username });
-        conn.connect({
-          host,
-          port,
-          username,
-          password,
-          // MVP: allow unknown host keys (NOT recommended for production)
-          hostVerifier: () => true,
-          readyTimeout: 20000,
         });
 
-        ws.send(JSON.stringify({ type: "status", status: "connecting" }));
-        return;
-      }
-
-      // 2) RUN COMMAND (exec)
-      if (msg.type === "exec") {
-        const { command } = msg.payload || {};
-        if (!ws.ssh || !ws.isReady) {
-          ws.send(JSON.stringify({ type: "error", message: "Not connected" }));
-          return;
-        }
-        if (!command || typeof command !== "string") {
-          ws.send(JSON.stringify({ type: "error", message: "command required" }));
-          return;
-        }
-
-        logger.info(`[WS] Executing command`, { id, command });
-        ws.send(JSON.stringify({ type: "exec_start", command }));
-
-        ws.ssh.exec(command, { pty: true }, (err, stream) => {
-          if (err) {
-            logger.error(`[WS] Exec failed`, { id, error: err.message });
-            ws.send(JSON.stringify({ type: "error", message: `Exec failed: ${err.message}` }));
-            return;
+        conn.on("ready", async () => {
+          let serverId = null;
+          if (saveProfile && ws.userId) {
+            const { ciphertext, iv, tag } = encrypt(secret);
+            const saved = await prisma.savedServer.create({
+              data: {
+                userId: ws.userId,
+                name: profileName || host,
+                host, port: Number(port), username, authType,
+                encryptedSecret: ciphertext, secretIv: iv, secretTag: tag
+              }
+            });
+            serverId = saved.id;
           }
 
-          stream.on("data", (data) => {
-            ws.send(JSON.stringify({ type: "stdout", data: data.toString() }));
-          });
+          const sessionId = await createSession(ws.userId, { id: serverId, host, port, username, authType });
+          activeConnections.set(sessionId, conn);
+          ws.sessions.add(sessionId);
+          
+          ws.send(JSON.stringify({ type: "connected", payload: { sessionId } }));
+          logger.info(`SSH Session created: ${sessionId}`, { userId: ws.userId, host });
+        });
 
-          stream.stderr.on("data", (data) => {
-            ws.send(JSON.stringify({ type: "stderr", data: data.toString() }));
-          });
+        conn.on("error", (err) => {
+          ws.send(JSON.stringify({ type: "error", message: `SSH error: ${err.message}` }));
+        });
 
-          stream.on("close", (code, signal) => {
-            logger.info(`[WS] Command finished`, { id, code, signal });
-            ws.send(JSON.stringify({ type: "exec_end", code, signal }));
-          });
+        conn.connect({
+          host, port, username, password, privateKey, passphrase,
+          tryKeyboard: true,
+          hostVerifier: () => true,
+          readyTimeout: 20000
         });
         return;
       }
 
-      // 3) DISCONNECT
-      if (msg.type === "disconnect") {
-        if (ws.ssh) {
-          try { ws.ssh.end(); } catch {}
+      // 2) ATTACH (Restore session after refresh)
+      if (msg.type === "attach") {
+        const { sessionId } = msg.payload;
+        try {
+          const conn = await getOrConnectSSH(sessionId, ws);
+          ws.sessions.add(sessionId);
+          ws.send(JSON.stringify({ type: "status", status: "connected", sessionId }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: err.message }));
         }
-        ws.ssh = null;
-        ws.isReady = false;
-        ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
         return;
       }
 
-      ws.send(JSON.stringify({ type: "error", message: "Unknown message type" }));
+      // 3) EXEC
+      if (msg.type === "exec") {
+        const { sessionId, command } = msg.payload;
+        try {
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const session = await getSession(sessionId);
+
+          const auditLog = await prisma.auditLog.create({
+            data: {
+              userId: ws.userId,
+              serverId: session.serverId,
+              sessionId,
+              command,
+              status: "running"
+            }
+          });
+
+          ws.send(JSON.stringify({ type: "exec_start", sessionId, command }));
+
+          conn.exec(command, { pty: true }, (err, stream) => {
+            if (err) {
+              ws.send(JSON.stringify({ type: "error", message: `Exec failed: ${err.message}` }));
+              return;
+            }
+
+            stream.on("data", (data) => {
+              ws.send(JSON.stringify({ type: "stdout", sessionId, data: data.toString() }));
+            });
+
+            stream.stderr.on("data", (data) => {
+              ws.send(JSON.stringify({ type: "stderr", sessionId, data: data.toString() }));
+            });
+
+            stream.on("close", async (code, signal) => {
+              await prisma.auditLog.update({
+                where: { id: auditLog.id },
+                data: { status: "finished", exitCode: code, finishedAt: new Date() }
+              });
+              ws.send(JSON.stringify({ type: "exec_end", sessionId, code, signal }));
+            });
+          });
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: err.message }));
+        }
+        return;
+      }
+
+      // 4) DISCONNECT
+      if (msg.type === "disconnect") {
+        const { sessionId } = msg.payload;
+        await deleteSession(sessionId);
+        ws.sessions.delete(sessionId);
+        ws.send(JSON.stringify({ type: "status", status: "disconnected", sessionId }));
+        return;
+      }
     });
 
     ws.on("close", () => {
-      logger.info(`[WS] Disconnected`, { id });
-      if (ws.ssh) {
-        try { ws.ssh.end(); } catch {}
-      }
+      // We don't necessarily close SSH connections here because they should survive refresh
+      // unless we want to implement a short timeout for re-attach.
+      // Redis TTL will eventually clean them up if they are truly abandoned.
     });
   });
 

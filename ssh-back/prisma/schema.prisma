@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String        @id @default(uuid())
+  email         String        @unique
+  passwordHash  String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  savedServers  SavedServer[]
+  auditLogs     AuditLog[]
+}
+
+model SavedServer {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  name            String
+  host            String
+  port            Int      @default(22)
+  username        String
+  
+  // Auth type: "password", "key", "interactive"
+  authType        String   
+  
+  // Encrypted secrets (AES-256-GCM)
+  encryptedSecret String   // Base64 ciphertext
+  secretIv        String   // Base64 IV
+  secretTag       String   // Base64 Auth Tag
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  auditLogs       AuditLog[]
+}
+
+model AuditLog {
+  id          String       @id @default(uuid())
+  userId      String?
+  user        User?        @relation(fields: [userId], references: [id])
+  serverId    String?
+  server      SavedServer? @relation(fields: [serverId], references: [id])
+  
+  sessionId   String
+  command     String
+  
+  // Status: "success", "failed", "running"
+  status      String       @default("success")
+  exitCode    Int?
+  
+  startedAt   DateTime     @default(now())
+  finishedAt  DateTime?
+  createdAt   DateTime     @default(now())
+}
