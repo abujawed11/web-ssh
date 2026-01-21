@@ -4,8 +4,84 @@ const { v4: uuidv4 } = require("uuid");
 const logger = require("./logger");
 const prisma = require("./db");
 const { verifyToken } = require("./auth");
-const { createSession, getSession, deleteSession, getOrConnectSSH, activeConnections } = require("./sessionManager");
+const { createSession, getSession, updateSession, deleteSession, getOrConnectSSH, getOrCreateSftp, dropSftp, activeConnections } = require("./sessionManager");
 const { encrypt, decrypt } = require("./crypto");
+
+function shQuote(value) {
+  const str = String(value ?? "");
+  return `'${str.replace(/'/g, `'\\''`)}'`;
+}
+
+function normalizePosixAbsolutePath(input) {
+  const raw = String(input ?? "").trim();
+  if (!raw) throw new Error("Path is required");
+  if (raw.includes("\0") || raw.includes("\r") || raw.includes("\n")) throw new Error("Invalid path");
+
+  const standardized = raw.replace(/\\/g, "/");
+  if (!standardized.startsWith("/")) throw new Error("Path must be absolute");
+
+  const parts = standardized.split("/");
+  const stack = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+
+  return `/${stack.join("/")}`;
+}
+
+function execOnce(conn, command) {
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+
+    conn.exec(command, { pty: false }, (err, stream) => {
+      if (err) return reject(err);
+
+      stream.on("data", (data) => {
+        stdout += data.toString();
+      });
+
+      stream.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+
+      stream.on("close", (code, signal) => {
+        resolve({ stdout, stderr, code, signal });
+      });
+    });
+  });
+}
+
+async function determineInitialCwd(conn, username) {
+  const home = `/home/${username}`;
+  const cmd = `if [ -d ${shQuote(home)} ]; then printf %s ${shQuote(home)}; else printf %s /; fi`;
+  try {
+    const { stdout, code } = await execOnce(conn, cmd);
+    if (code === 0) {
+      const resolved = stdout.trim();
+      if (resolved.startsWith("/")) return resolved;
+    }
+  } catch {
+    // ignore and fall back
+  }
+  return "/";
+}
+
+function classifySftpEntry(attrs) {
+  try {
+    if (attrs?.isDirectory?.()) return "dir";
+    if (attrs?.isFile?.()) return "file";
+    if (attrs?.isSymbolicLink?.()) return "link";
+  } catch {
+    // ignore
+  }
+  return "other";
+}
 
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server });
@@ -75,12 +151,14 @@ function setupWebSocket(server) {
           }
 
           const sessionId = await createSession(ws.userId, { id: serverId, host, port, username, authType });
+          const cwd = await determineInitialCwd(conn, username);
+          await updateSession(sessionId, { cwd });
           activeConnections.set(sessionId, conn);
           ws.sessions.add(sessionId);
           
           ws.send(JSON.stringify({ 
             type: "connected", 
-            payload: { sessionId, host, port, username, authType } 
+            payload: { sessionId, host, port, username, authType, cwd } 
           }));
           logger.info(`SSH Session created: ${sessionId}`, { userId: ws.userId, host });
         });
@@ -110,6 +188,7 @@ function setupWebSocket(server) {
             type: "status", 
             status: "connected", 
             sessionId,
+            cwd: session?.cwd || "/",
             connection: session ? {
               host: session.host,
               port: session.port,
@@ -123,12 +202,95 @@ function setupWebSocket(server) {
         return;
       }
 
+      // 2a) GET_CWD
+      if (msg.type === "get_cwd") {
+        const { sessionId } = msg.payload || {};
+        try {
+          const session = await getSession(sessionId);
+          if (!session) throw new Error("Session expired or not found");
+          ws.send(JSON.stringify({ type: "cwd", sessionId, cwd: session.cwd || "/" }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: err.message }));
+        }
+        return;
+      }
+
+      // 2b) SET_CWD
+      if (msg.type === "set_cwd") {
+        const { sessionId, path } = msg.payload || {};
+        try {
+          const nextCwd = normalizePosixAbsolutePath(path);
+          const conn = await getOrConnectSSH(sessionId, ws);
+
+          const { code } = await execOnce(conn, `test -d ${shQuote(nextCwd)}`);
+          if (code !== 0) throw new Error(`Not a directory: ${nextCwd}`);
+
+          await updateSession(sessionId, { cwd: nextCwd });
+          ws.send(JSON.stringify({ type: "cwd", sessionId, cwd: nextCwd }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: err.message }));
+        }
+        return;
+      }
+
+      // 2c) LIST_DIR
+      if (msg.type === "list_dir") {
+        const { sessionId } = msg.payload || {};
+        try {
+          const session = await getSession(sessionId);
+          if (!session) throw new Error("Session expired or not found");
+
+          const requestedPath = msg.payload?.path ? normalizePosixAbsolutePath(msg.payload.path) : (session.cwd || "/");
+          const conn = await getOrConnectSSH(sessionId, ws);
+
+          const listOnce = async () => {
+            const sftp = await getOrCreateSftp(sessionId, conn);
+            return new Promise((resolve, reject) => {
+              sftp.readdir(requestedPath, (err, list) => {
+                if (err) return reject(err);
+                resolve(list);
+              });
+            });
+          };
+
+          let list;
+          try {
+            list = await listOnce();
+          } catch (err) {
+            // SFTP channel can die; drop cache and retry once.
+            dropSftp(sessionId);
+            list = await listOnce();
+          }
+
+          const entries = (list || []).map((e) => ({
+            name: e.filename,
+            type: classifySftpEntry(e.attrs),
+            size: e.attrs?.size ?? null,
+            mtime: e.attrs?.mtime ?? null,
+          }));
+
+          entries.sort((a, b) => {
+            const aDir = a.type === "dir";
+            const bDir = b.type === "dir";
+            if (aDir !== bDir) return aDir ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+
+          ws.send(JSON.stringify({ type: "dir_list", sessionId, path: requestedPath, entries }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: "error", message: `list_dir failed: ${err.message}` }));
+        }
+        return;
+      }
+
       // 3) EXEC
       if (msg.type === "exec") {
         const { sessionId, command } = msg.payload;
         try {
           const conn = await getOrConnectSSH(sessionId, ws);
           const session = await getSession(sessionId);
+          const cwd = session?.cwd || "/";
+          const wrappedCommand = `cd ${shQuote(cwd)} && ${command}`;
 
           const auditLog = await prisma.auditLog.create({
             data: {
@@ -140,9 +302,9 @@ function setupWebSocket(server) {
             }
           });
 
-          ws.send(JSON.stringify({ type: "exec_start", sessionId, command }));
+          ws.send(JSON.stringify({ type: "exec_start", sessionId, command, cwd }));
 
-          conn.exec(command, { pty: true }, (err, stream) => {
+          conn.exec(wrappedCommand, { pty: true }, (err, stream) => {
             if (err) {
               ws.send(JSON.stringify({ type: "error", message: `Exec failed: ${err.message}` }));
               return;

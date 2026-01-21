@@ -6,6 +6,7 @@ const logger = require("./logger");
 
 // In-memory map of active SSH connections (ephemeral)
 const activeConnections = new Map();
+const activeSftps = new Map();
 
 const SESSION_TTL = 30 * 60; // 30 minutes in seconds
 
@@ -38,10 +39,58 @@ async function getSession(sessionId) {
   return JSON.parse(data);
 }
 
+async function updateSession(sessionId, patch) {
+  const sessionKey = `webssh:sess:${sessionId}`;
+  const data = await redis.get(sessionKey);
+  if (!data) return null;
+
+  const session = JSON.parse(data);
+  const next = {
+    ...session,
+    ...patch,
+    lastUsedAt: new Date().toISOString(),
+  };
+
+  await redis.set(sessionKey, JSON.stringify(next), "EX", SESSION_TTL);
+  return next;
+}
+
+function dropSftp(sessionId) {
+  const sftp = activeSftps.get(sessionId);
+  try {
+    sftp?.end?.();
+  } catch {
+    // ignore
+  }
+  activeSftps.delete(sessionId);
+}
+
+function getOrCreateSftp(sessionId, conn) {
+  if (activeSftps.has(sessionId)) return Promise.resolve(activeSftps.get(sessionId));
+
+  return new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => {
+      if (err) return reject(err);
+      activeSftps.set(sessionId, sftp);
+
+      try {
+        sftp.on("close", () => {
+          activeSftps.delete(sessionId);
+        });
+      } catch {
+        // ignore
+      }
+
+      resolve(sftp);
+    });
+  });
+}
+
 async function deleteSession(sessionId) {
   const sessionKey = `webssh:sess:${sessionId}`;
   await redis.del(sessionKey);
   
+  dropSftp(sessionId);
   const conn = activeConnections.get(sessionId);
   if (conn) {
     conn.end();
@@ -88,6 +137,7 @@ async function getOrConnectSSH(sessionId, ws) {
       reject(err);
     }).on("close", () => {
       activeConnections.delete(sessionId);
+      dropSftp(sessionId);
       ws.send(JSON.stringify({ type: "status", status: "disconnected", sessionId }));
     });
 
@@ -120,7 +170,10 @@ setInterval(async () => {
 module.exports = {
   createSession,
   getSession,
+  updateSession,
   deleteSession,
   getOrConnectSSH,
+  getOrCreateSftp,
+  dropSftp,
   activeConnections
 };

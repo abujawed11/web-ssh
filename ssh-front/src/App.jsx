@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Toaster } from "react-hot-toast";
 import Login from "./components/Login";
 import Header from "./components/Header";
+import FileExplorer from "./components/FileExplorer";
 import ConnectPanel from "./components/ConnectPanel";
 import ConnectedCard from "./components/ConnectedCard";
 import TaskPanel from "./components/TaskPanel";
@@ -19,6 +20,10 @@ export default function App() {
   const {
     wsStatus,
     connectionState, // The source of truth for connection info
+    cwd,
+    dirPath,
+    dirEntries,
+    dirLoading,
     running,
     output,
     kiPrompt,
@@ -26,6 +31,8 @@ export default function App() {
     disconnectSSH,
     runCommand,
     clearOutput,
+    listDir,
+    setCwd,
     answerKI
   } = useSSH();
 
@@ -64,8 +71,21 @@ export default function App() {
       <main className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
         {/* Top Section: Connection & Tasks */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-[500px]">
-          {/* Left Column: Connection Manager */}
-          <div className="md:col-span-7 h-full min-h-0">
+          {/* Left Column: File Explorer */}
+          <div className="md:col-span-4 h-full min-h-0">
+            <FileExplorer
+              connected={!!connectionState}
+              cwd={cwd}
+              dirPath={dirPath}
+              entries={dirEntries}
+              loading={dirLoading}
+              onSetCwd={setCwd}
+              onRefresh={() => listDir(dirPath)}
+            />
+          </div>
+
+          {/* Middle Column: Connection Manager */}
+          <div className="md:col-span-4 h-full min-h-0">
             {connectionState ? (
               <ConnectedCard 
                 connection={connectionState} 
@@ -80,7 +100,7 @@ export default function App() {
           </div>
 
           {/* Right Column: Task Library */}
-          <div className="md:col-span-5 h-full min-h-0">
+          <div className="md:col-span-4 h-full min-h-0">
             <TaskPanel onSelectCommand={setSelectedCmd} />
           </div>
         </div>
@@ -94,6 +114,7 @@ export default function App() {
             onClear={clearOutput}
             isConnected={!!connectionState}
             isRunning={running}
+            cwd={cwd}
           />
           
           <TerminalPanel output={output} />

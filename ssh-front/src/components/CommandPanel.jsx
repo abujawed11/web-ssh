@@ -1,6 +1,6 @@
 import { Play, Eraser, TerminalSquare } from "lucide-react";
 
-export default function CommandPanel({ selectedCmd, onCmdChange, onRun, onClear, isConnected, isRunning }) {
+export default function CommandPanel({ selectedCmd, onCmdChange, onRun, onClear, isConnected, isRunning, cwd }) {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && e.ctrlKey) {
       onRun();
@@ -14,9 +14,17 @@ export default function CommandPanel({ selectedCmd, onCmdChange, onRun, onClear,
           <TerminalSquare className="w-4 h-4 text-emerald-400" />
           Command Editor
         </h3>
-        <span className="text-[10px] text-slate-500 bg-slate-900 px-2 py-1 rounded border border-slate-700">
-          Ctrl + Enter to run
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[10px] text-slate-400 bg-slate-900 px-2 py-1 rounded border border-slate-700 max-w-[260px] truncate"
+            title={cwd || "/"}
+          >
+            cwd: {cwd || "/"}
+          </span>
+          <span className="text-[10px] text-slate-500 bg-slate-900 px-2 py-1 rounded border border-slate-700">
+            Ctrl + Enter to run
+          </span>
+        </div>
       </div>
       
       <div className="relative">
