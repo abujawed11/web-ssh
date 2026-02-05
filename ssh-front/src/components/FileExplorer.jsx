@@ -16,6 +16,7 @@ import {
   Pencil,
   Trash2,
   TextCursorInput,
+  Cog,
 } from "lucide-react";
 import FileEditorModal from "./FileEditorModal";
 import SessionModal from "./SessionModal";
@@ -66,6 +67,7 @@ export default function FileExplorer({
   onMovePath,
   onReadFile,
   onWriteFile,
+  onCreateSystemdService,
 }) {
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
@@ -516,6 +518,23 @@ export default function FileExplorer({
                     <Trash2 className="w-4 h-4" />
                     Delete
                   </button>
+
+                  {ctxIsDir && (
+                    <>
+                      <div className="my-1 border-t border-slate-700" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMenu(null);
+                          onCreateSystemdService?.(ctxTarget.path);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-sm text-emerald-300 flex items-center gap-2"
+                      >
+                        <Cog className="w-4 h-4" />
+                        Create Systemd Service
+                      </button>
+                    </>
+                  )}
                 </>
               ) : (
                 <button

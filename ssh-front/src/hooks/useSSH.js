@@ -3,18 +3,12 @@ import toast from "react-hot-toast";
 
 const WS_URL = "ws://localhost:8080";
 
-function stripAnsi(input) {
-  const str = String(input ?? "");
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
-}
-
-function buildPrompt(connection, cwd) {
+function buildAnsiPrompt(connection, cwd) {
   if (!connection) return "";
   const host = connection.hostName || connection.host || "host";
   const user = connection.username || "user";
   const path = cwd || "/";
-  return `${user}@${host}:${path}`;
+  return `\x1b[32m${user}\x1b[0m@\x1b[36m${host}\x1b[0m:\x1b[34m${path}\x1b[0m`;
 }
 
 export function useSSH() {
@@ -38,7 +32,8 @@ export function useSSH() {
   const [runningExecId, setRunningExecId] = useState(null);
   const [output, setOutput] = useState("");
   const [kiPrompt, setKiPrompt] = useState(null);
-  
+  const [shellReady, setShellReady] = useState(false);
+
   const wsRef = useRef(null);
   const pendingConnectRef = useRef(null);
   const pendingDirRequestRef = useRef(null);
@@ -46,6 +41,8 @@ export function useSSH() {
   const connectionRef = useRef(null);
   const cwdRef = useRef("/");
   const pendingReqRef = useRef(new Map());
+  const terminalEchoRef = useRef(null); // { command, ts }
+  const shellDataCallbackRef = useRef(null); // Callback for shell data
 
   const request = useCallback((type, payload) => {
     const sessionId = payload?.sessionId ?? sessionIdRef.current;
@@ -266,18 +263,47 @@ export function useSSH() {
           setRunningExecId(msg.execId || null);
           if (msg.cwd) applyCwd(msg.cwd);
           setOutput((o) => {
-            const prompt = buildPrompt(connectionRef.current, msg.cwd || cwdRef.current);
-            return o + `\n${prompt ? `${prompt} ` : ""}$ ${msg.command}\n`;
+            const echo = terminalEchoRef.current;
+            if (echo) {
+              const fresh = Date.now() - echo.ts < 5000;
+              const same = String(echo.command ?? "").trim() === String(msg.command ?? "").trim();
+              if (fresh && same) {
+                terminalEchoRef.current = null;
+                return o;
+              }
+              if (!fresh) terminalEchoRef.current = null;
+            }
+            const prompt = buildAnsiPrompt(connectionRef.current, msg.cwd || cwdRef.current);
+            return o + `\n${prompt ? `${prompt} ` : ""}$ \x1b[37m${msg.command}\x1b[0m\n`;
           });
           break;
         case "stdout":
+          setOutput((o) => o + String(msg.data ?? ""));
+          break;
         case "stderr":
-          setOutput((o) => o + stripAnsi(msg.data));
+          // Keep output colorful in xterm, but still readable when copied (TerminalPanel strips ANSI on copy).
+          setOutput((o) => o + `\x1b[31m${String(msg.data ?? "")}\x1b[0m`);
           break;
         case "exec_end":
           setRunning(false);
           setRunningExecId(null);
-          setOutput(o => o + `\n[Exit ${msg.code ?? "?"}]\n`);
+          setOutput((o) => {
+            const code = msg.code ?? "?";
+            const ok = code === 0;
+            const color = ok ? "\x1b[32m" : "\x1b[31m";
+            return o + `\n${color}[Exit ${code}]\x1b[0m\n`;
+          });
+          break;
+        case "shell_ready":
+          setShellReady(true);
+          break;
+        case "shell_data":
+          if (shellDataCallbackRef.current) {
+            shellDataCallbackRef.current(msg.data);
+          }
+          break;
+        case "shell_closed":
+          setShellReady(false);
           break;
         case "services_list":
           if (msg.sessionId && sessionIdRef.current && msg.sessionId !== sessionIdRef.current) break;
@@ -309,6 +335,9 @@ export function useSSH() {
           setRunning(false);
           setDirLoading(false);
           if (!requestHandled) toast.error(msg.message);
+          if (!requestHandled && msg.message) {
+            setOutput((o) => o + `\n\x1b[31m[Error] ${String(msg.message)}\x1b[0m\n`);
+          }
           setIsFetchingServices(false);
           setIsFetchingDockerContainers(false);
           setIsFetchingDockerImages(false);
@@ -396,6 +425,12 @@ export function useSSH() {
     wsRef.current?.send(JSON.stringify({ type: "exec", payload: { sessionId: connectionState.sessionId, command } }));
   };
 
+  const runCommandFromTerminal = (command) => {
+    if (!command.trim() || !connectionState?.sessionId) return;
+    terminalEchoRef.current = { command, ts: Date.now() };
+    wsRef.current?.send(JSON.stringify({ type: "exec", payload: { sessionId: connectionState.sessionId, command } }));
+  };
+
   const stopExec = (execId) => {
     if (!connectionState?.sessionId || !execId) return;
     wsRef.current?.send(JSON.stringify({ type: "exec_stop", payload: { sessionId: connectionState.sessionId, execId } }));
@@ -438,6 +473,25 @@ export function useSSH() {
     setKiPrompt(null);
   };
 
+  const startShell = (cols, rows) => {
+    if (!connectionState?.sessionId) return;
+    send({ type: "shell_start", payload: { sessionId: connectionState.sessionId, cols, rows } });
+  };
+
+  const sendShellInput = (data) => {
+    if (!connectionState?.sessionId) return;
+    send({ type: "shell_input", payload: { sessionId: connectionState.sessionId, data } });
+  };
+
+  const resizeShell = (cols, rows) => {
+    if (!connectionState?.sessionId) return;
+    send({ type: "shell_resize", payload: { sessionId: connectionState.sessionId, cols, rows } });
+  };
+
+  const setShellDataCallback = useCallback((callback) => {
+    shellDataCallbackRef.current = callback;
+  }, []);
+
   return {
     wsStatus,
     connectionState, // The source of truth for "Are we connected?"
@@ -472,6 +526,7 @@ export function useSSH() {
     readFile,
     writeFile,
     runCommand,
+    runCommandFromTerminal,
     stopExec,
     fetchServices,
     fetchDockerContainers,
@@ -479,6 +534,11 @@ export function useSSH() {
     fetchNginxSites,
     fetchNginxSitesAvailable,
     clearOutput: () => setOutput(""),
-    answerKI
+    answerKI,
+    startShell,
+    sendShellInput,
+    resizeShell,
+    setShellDataCallback,
+    shellReady
   };
 }

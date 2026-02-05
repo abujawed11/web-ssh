@@ -8,6 +8,7 @@ const { createSession, getSession, updateSession, deleteSession, getOrConnectSSH
 const { encrypt, decrypt } = require("./crypto");
 
 const activeExecs = new Map(); // execId -> { sessionId, stream, ws }
+const activeShells = new Map(); // sessionId -> { stream, ws }
 
 function shQuote(value) {
   const str = String(value ?? "");
@@ -1041,9 +1042,95 @@ function setupWebSocket(server) {
         return;
       }
 
+      // 3c) SHELL_START - Create persistent shell with PTY
+      if (msg.type === "shell_start") {
+        const { sessionId, cols = 80, rows = 24 } = msg.payload || {};
+        logger.info(`[SHELL] Starting shell for session ${sessionId} (${cols}x${rows})`);
+        try {
+          // Close existing shell if any
+          const existing = activeShells.get(sessionId);
+          if (existing) {
+            logger.info(`[SHELL] Closing existing shell for session ${sessionId}`);
+            try { existing.stream.close(); } catch {}
+            activeShells.delete(sessionId);
+          }
+
+          const conn = await getOrConnectSSH(sessionId, ws);
+          const session = await getSession(sessionId);
+          if (!session) throw new Error("Session expired or not found");
+
+          conn.shell({ term: "xterm-256color", cols, rows }, (err, stream) => {
+            if (err) {
+              logger.error(`[SHELL] Failed to start shell: ${err.message}`);
+              ws.send(JSON.stringify({ type: "error", message: `Shell failed: ${err.message}` }));
+              return;
+            }
+
+            logger.info(`[SHELL] Shell started successfully for session ${sessionId}`);
+            activeShells.set(sessionId, { stream, ws });
+
+            // Send all shell output to client
+            stream.on("data", (data) => {
+              ws.send(JSON.stringify({ type: "shell_data", sessionId, data: data.toString("utf8") }));
+            });
+
+            stream.stderr.on("data", (data) => {
+              ws.send(JSON.stringify({ type: "shell_data", sessionId, data: data.toString("utf8") }));
+            });
+
+            stream.on("close", () => {
+              logger.info(`[SHELL] Shell closed for session ${sessionId}`);
+              activeShells.delete(sessionId);
+              ws.send(JSON.stringify({ type: "shell_closed", sessionId }));
+            });
+
+            ws.send(JSON.stringify({ type: "shell_ready", sessionId }));
+          });
+        } catch (err) {
+          logger.error(`[SHELL] Error: ${err.message}`);
+          ws.send(JSON.stringify({ type: "error", message: `shell_start failed: ${err.message}` }));
+        }
+        return;
+      }
+
+      // 3d) SHELL_INPUT - Send user input to shell
+      if (msg.type === "shell_input") {
+        const { sessionId, data } = msg.payload || {};
+        try {
+          const shell = activeShells.get(sessionId);
+          if (!shell) throw new Error("No active shell for this session");
+          shell.stream.write(data);
+        } catch (err) {
+          logger.error(`[SHELL] Input error: ${err.message}`);
+          ws.send(JSON.stringify({ type: "error", message: `shell_input failed: ${err.message}` }));
+        }
+        return;
+      }
+
+      // 3e) SHELL_RESIZE - Resize the PTY
+      if (msg.type === "shell_resize") {
+        const { sessionId, cols, rows } = msg.payload || {};
+        try {
+          const shell = activeShells.get(sessionId);
+          if (!shell) throw new Error("No active shell for this session");
+          shell.stream.setWindow(rows, cols);
+        } catch (err) {
+          // Ignore resize errors silently
+        }
+        return;
+      }
+
       // 4) DISCONNECT
       if (msg.type === "disconnect") {
         const { sessionId } = msg.payload;
+
+        // Close shell if active
+        const shell = activeShells.get(sessionId);
+        if (shell) {
+          try { shell.stream.close(); } catch {}
+          activeShells.delete(sessionId);
+        }
+
         await deleteSession(sessionId);
         ws.sessions.delete(sessionId);
         ws.send(JSON.stringify({ type: "status", status: "disconnected", sessionId }));
@@ -1052,6 +1139,14 @@ function setupWebSocket(server) {
     });
 
     ws.on("close", () => {
+      // Close any active shells for this WebSocket
+      for (const [sessionId, shell] of activeShells.entries()) {
+        if (shell.ws === ws) {
+          try { shell.stream.close(); } catch {}
+          activeShells.delete(sessionId);
+        }
+      }
+
       // We don't necessarily close SSH connections here because they should survive refresh
       // unless we want to implement a short timeout for re-attach.
       // Redis TTL will eventually clean them up if they are truly abandoned.

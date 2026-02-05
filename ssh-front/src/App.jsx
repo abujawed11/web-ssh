@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Toaster } from "react-hot-toast";
 import Login from "./components/Login";
 import Header from "./components/Header";
@@ -9,8 +9,10 @@ import TaskPanel from "./components/TaskPanel";
 import TaskWindow from "./components/TaskWindow";
 import CommandPanel from "./components/CommandPanel";
 import TerminalPanel from "./components/TerminalPanel";
+import ShellTerminal from "./components/ShellTerminal";
 import KIModal from "./components/KIModal";
 import SessionModal from "./components/SessionModal";
+import SystemdGeneratorModal from "./components/SystemdGeneratorModal";
 import { useSSH } from "./hooks/useSSH";
 import { findGroupById, getDefaultGroupId } from "./tasks/taskLibrary";
 
@@ -44,6 +46,7 @@ export default function App() {
     connectSSH,
     disconnectSSH,
     runCommand,
+    runCommandFromTerminal,
     stopExec,
     clearOutput,
     listDir,
@@ -61,14 +64,26 @@ export default function App() {
     fetchDockerImages,
     fetchNginxSites,
     fetchNginxSitesAvailable,
-    answerKI
+    answerKI,
+    startShell,
+    sendShellInput,
+    resizeShell,
+    setShellDataCallback,
+    shellReady
   } = useSSH();
 
   const [selectedCmd, setSelectedCmd] = useState("");
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState(getDefaultGroupId);
+  const [systemdModalOpen, setSystemdModalOpen] = useState(false);
+  const [systemdFolderPath, setSystemdFolderPath] = useState("");
 
   const activeGroup = findGroupById(activeGroupId);
+
+  const handleCreateSystemdService = (folderPath) => {
+    setSystemdFolderPath(folderPath);
+    setSystemdModalOpen(true);
+  };
 
   if (!user) {
     return (
@@ -131,6 +146,7 @@ export default function App() {
               onMovePath={movePath}
               onReadFile={readFile}
               onWriteFile={writeFile}
+              onCreateSystemdService={handleCreateSystemdService}
             />
           </div>
 
@@ -145,7 +161,10 @@ export default function App() {
                 onSelectCommand={setSelectedCmd}
                 onRunCommand={(cmd) => {
                   setSelectedCmd(cmd);
-                  runCommand(cmd);
+                  // Send to shell terminal
+                  if (cmd.trim() && shellReady) {
+                    sendShellInput(cmd + '\r');
+                  }
                 }}
                 services={servicesCache}
                 servicesLoading={isFetchingServices}
@@ -168,24 +187,36 @@ export default function App() {
             <CommandPanel
               selectedCmd={selectedCmd}
               onCmdChange={setSelectedCmd}
-              onRun={() => runCommand(selectedCmd)}
-              onClear={clearOutput}
+              onRun={() => {
+                // Send command to shell terminal
+                if (selectedCmd.trim() && shellReady) {
+                  sendShellInput(selectedCmd + '\r');
+                }
+              }}
+              onClear={() => {
+                // Clear terminal screen
+                if (shellReady) {
+                  sendShellInput('\x0c'); // Ctrl+L to clear
+                }
+              }}
               isConnected={!!connectionState}
               isRunning={running}
               cwd={cwd}
             />
 
             <div className="flex-1 min-h-0">
-              <TerminalPanel
-                output={output}
+              <ShellTerminal
                 className="h-full"
                 title={
                   connectionState
-                    ? `${connectionState.username || "user"}@${connectionState.hostName || connectionState.host} — ${cwd || "/"}`
+                    ? `${connectionState.username || "user"}@${connectionState.hostName || connectionState.host}`
                     : "Not connected"
                 }
-                canStop={!!runningExecId}
-                onStop={() => stopExec(runningExecId)}
+                connected={!!connectionState}
+                onShellStart={startShell}
+                onShellInput={sendShellInput}
+                onShellResize={resizeShell}
+                onShellData={setShellDataCallback}
               />
             </div>
           </div>
@@ -199,6 +230,16 @@ export default function App() {
 
       {/* Modals */}
       {kiPrompt && <KIModal prompt={kiPrompt} onSubmit={answerKI} />}
+
+      <SystemdGeneratorModal
+        open={systemdModalOpen}
+        folderPath={systemdFolderPath}
+        onClose={() => setSystemdModalOpen(false)}
+        onReadFile={readFile}
+        onWriteFile={writeFile}
+        onRunCommand={runCommand}
+        currentUser={connectionState?.username}
+      />
 
       <SessionModal
         open={sessionModalOpen}
