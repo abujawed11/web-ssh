@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Toaster } from "react-hot-toast";
 import Login from "./components/Login";
 import Header from "./components/Header";
@@ -77,6 +77,7 @@ export default function App() {
   const [activeGroupId, setActiveGroupId] = useState(getDefaultGroupId);
   const [systemdModalOpen, setSystemdModalOpen] = useState(false);
   const [systemdFolderPath, setSystemdFolderPath] = useState("");
+  const prevCwdRef = useRef(null);
 
   const activeGroup = findGroupById(activeGroupId);
 
@@ -84,6 +85,15 @@ export default function App() {
     setSystemdFolderPath(folderPath);
     setSystemdModalOpen(true);
   };
+
+  // Sync shell directory with file explorer
+  useEffect(() => {
+    if (shellReady && cwd && prevCwdRef.current !== null && prevCwdRef.current !== cwd) {
+      // Send cd command to shell when directory changes in file explorer
+      sendShellInput(`cd '${cwd}'\r`);
+    }
+    prevCwdRef.current = cwd;
+  }, [cwd, shellReady, sendShellInput]);
 
   if (!user) {
     return (
