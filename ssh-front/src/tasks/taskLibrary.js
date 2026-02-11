@@ -16,6 +16,7 @@ import {
   Wrench,
   Gauge,
   ShieldAlert,
+  FileCode,
 } from "lucide-react";
 
 export const TASK_GROUPS = [
@@ -641,6 +642,741 @@ export const TASK_GROUPS = [
       { id: "git-branches", title: "Branches", tags: ["git", "repo"], command: "git branch -av || true" },
       { id: "git-log", title: "Recent Commits", tags: ["git", "repo"], command: "git --no-pager log --oneline -n 20 || true" },
       { id: "git-remote", title: "Remotes", tags: ["git", "repo"], command: "git remote -v || true" },
+    ],
+  },
+  {
+    id: "templates",
+    title: "Templates",
+    icon: FileCode,
+    description: "Deploy ready-to-use templates (HTML pages, configs, docker-compose, etc).",
+    tasks: [
+      {
+        id: "template-index-modern",
+        title: "Deploy Modern Index.html",
+        tags: ["template", "html", "nginx"],
+        command: `sudo bash -c 'cat > /var/www/html/index.html << \"EOF\"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 600px;
+        }
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            animation: fadeInUp 0.8s ease;
+        }
+        p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 2rem;
+            animation: fadeInUp 1s ease;
+        }
+        .badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 0.5rem 1.5rem;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            animation: fadeInUp 1.2s ease;
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Server is Running</h1>
+        <p>Your nginx server is successfully configured and running!</p>
+        <div class="badge">✓ Status: Online</div>
+    </div>
+</body>
+</html>
+EOF
+' && echo '✓ Modern index.html deployed to /var/www/html/'`
+      },
+      {
+        id: "template-index-professional",
+        title: "Deploy Professional Landing Page",
+        tags: ["template", "html", "nginx"],
+        command: `sudo bash -c 'cat > /var/www/html/index.html << \"EOF\"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to Our Platform</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: \"Inter\", -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            line-height: 1.6;
+        }
+        header {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            padding: 1rem 0;
+            border-bottom: 1px solid #334155;
+        }
+        nav {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo { font-size: 1.5rem; font-weight: bold; color: #818cf8; }
+        .hero {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 6rem 2rem;
+            text-align: center;
+        }
+        h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle {
+            font-size: 1.25rem;
+            color: #94a3b8;
+            margin-bottom: 3rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem 4rem;
+        }
+        .feature {
+            background: #1e293b;
+            padding: 2rem;
+            border-radius: 1rem;
+            border: 1px solid #334155;
+            transition: transform 0.3s, border-color 0.3s;
+        }
+        .feature:hover {
+            transform: translateY(-5px);
+            border-color: #818cf8;
+        }
+        .feature h3 {
+            color: #818cf8;
+            margin-bottom: 0.5rem;
+            font-size: 1.25rem;
+        }
+        .icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #64748b;
+            border-top: 1px solid #334155;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo">⚡ YourBrand</div>
+        </nav>
+    </header>
+
+    <div class="hero">
+        <h1>Welcome to Your Server</h1>
+        <p class="subtitle">Your nginx server is up and running. Start building something amazing!</p>
+    </div>
+
+    <div class="features">
+        <div class="feature">
+            <div class="icon">🚀</div>
+            <h3>Fast & Secure</h3>
+            <p>Built on nginx for maximum performance and reliability.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">⚙️</div>
+            <h3>Easy to Configure</h3>
+            <p>Simple configuration with powerful customization options.</p>
+        </div>
+        <div class="feature">
+            <div class="icon">📊</div>
+            <h3>Scalable</h3>
+            <p>Designed to grow with your needs, from startup to enterprise.</p>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 Your Company. All rights reserved.</p>
+    </footer>
+</body>
+</html>
+EOF
+' && echo '✓ Professional landing page deployed to /var/www/html/'`
+      },
+      {
+        id: "template-coming-soon",
+        title: "Deploy Coming Soon Page",
+        tags: ["template", "html", "nginx"],
+        command: `sudo bash -c 'cat > /var/www/html/index.html << \"EOF\"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coming Soon</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        h1 {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            animation: pulse 2s infinite;
+        }
+        p {
+            font-size: 1.5rem;
+            opacity: 0.9;
+            margin-bottom: 2rem;
+        }
+        .countdown {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            margin-top: 3rem;
+        }
+        .time-unit {
+            background: rgba(255,255,255,0.1);
+            padding: 1.5rem 2rem;
+            border-radius: 1rem;
+            backdrop-filter: blur(10px);
+        }
+        .time-unit span {
+            display: block;
+            font-size: 3rem;
+            font-weight: bold;
+        }
+        .time-unit label {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Coming Soon</h1>
+        <p>We're working on something amazing. Stay tuned!</p>
+        <div class="countdown">
+            <div class="time-unit">
+                <span>00</span>
+                <label>Days</label>
+            </div>
+            <div class="time-unit">
+                <span>00</span>
+                <label>Hours</label>
+            </div>
+            <div class="time-unit">
+                <span>00</span>
+                <label>Minutes</label>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+' && echo '✓ Coming Soon page deployed to /var/www/html/'`
+      },
+      {
+        id: "template-maintenance",
+        title: "Deploy Maintenance Page",
+        tags: ["template", "html", "nginx"],
+        command: `sudo bash -c 'cat > /var/www/html/index.html << \"EOF\"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Under Maintenance</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 600px;
+        }
+        .icon {
+            font-size: 5rem;
+            margin-bottom: 2rem;
+            animation: spin 3s linear infinite;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            color: #f39c12;
+        }
+        p {
+            font-size: 1.2rem;
+            opacity: 0.8;
+            line-height: 1.8;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🔧</div>
+        <h1>Under Maintenance</h1>
+        <p>We're currently performing scheduled maintenance.<br>We'll be back up and running shortly.</p>
+    </div>
+</body>
+</html>
+EOF
+' && echo '✓ Maintenance page deployed to /var/www/html/'`
+      },
+      {
+        id: "template-404",
+        title: "Deploy Custom 404 Page",
+        tags: ["template", "html", "nginx"],
+        command: `sudo bash -c 'cat > /var/www/html/404.html << \"EOF\"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Page Not Found</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0f0f23;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        .error-code {
+            font-size: 8rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        p {
+            font-size: 1.1rem;
+            opacity: 0.7;
+            margin-bottom: 2rem;
+        }
+        a {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            text-decoration: none;
+            transition: transform 0.3s;
+        }
+        a:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-code">404</div>
+        <h1>Page Not Found</h1>
+        <p>The page you're looking for doesn't exist or has been moved.</p>
+        <a href="/">Go Home</a>
+    </div>
+</body>
+</html>
+EOF
+' && echo '✓ Custom 404 page deployed to /var/www/html/404.html'`
+      },
+      {
+        id: "template-nginx-reverse-proxy",
+        title: "Nginx: Reverse Proxy Template",
+        tags: ["template", "nginx", "config"],
+        requires: ["domain", "backend_port"],
+        command: `sudo bash -c 'cat > /etc/nginx/sites-available/{{domain}} << \"EOF\"
+server {
+    listen 80;
+    server_name {{domain}};
+
+    location / {
+        proxy_pass http://localhost:{{backend_port}};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\$http_upgrade;
+        proxy_set_header Connection \"upgrade\";
+        proxy_set_header Host \\$host;
+        proxy_set_header X-Real-IP \\$remote_addr;
+        proxy_set_header X-Forwarded-For \\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\$scheme;
+        proxy_cache_bypass \\$http_upgrade;
+    }
+}
+EOF
+' && echo '✓ Reverse proxy config created. Enable with: sudo ln -s /etc/nginx/sites-available/{{domain}} /etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload nginx'`
+      },
+      {
+        id: "template-nginx-static",
+        title: "Nginx: Static Site Template",
+        tags: ["template", "nginx", "config"],
+        requires: ["domain", "root_path"],
+        command: `sudo bash -c 'cat > /etc/nginx/sites-available/{{domain}} << \"EOF\"
+server {
+    listen 80;
+    server_name {{domain}};
+    root {{root_path}};
+    index index.html index.htm;
+
+    location / {
+        try_files \\$uri \\$uri/ =404;
+    }
+
+    location ~* \\.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)\\$ {
+        expires 1y;
+        add_header Cache-Control \"public, immutable\";
+    }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+}
+EOF
+' && echo '✓ Static site config created at /etc/nginx/sites-available/{{domain}}'`
+      },
+      {
+        id: "template-docker-compose-basic",
+        title: "Docker Compose: Basic Template",
+        tags: ["template", "docker", "compose"],
+        command: `cat > docker-compose.yml << 'EOF'
+version: '3.8'
+
+services:
+  app:
+    image: node:20-alpine
+    container_name: my-app
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    command: npm start
+    restart: unless-stopped
+
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: nginx
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf
+  #   depends_on:
+  #     - app
+  #   restart: unless-stopped
+
+networks:
+  default:
+    name: app-network
+EOF
+echo '✓ docker-compose.yml created in current directory'`
+      },
+      {
+        id: "template-docker-compose-fullstack",
+        title: "Docker Compose: Full Stack (App+DB)",
+        tags: ["template", "docker", "compose"],
+        command: `cat > docker-compose.yml << 'EOF'
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: myapp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  app:
+    image: node:20-alpine
+    container_name: app
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://admin:changeme@postgres:5432/myapp
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    command: npm start
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: fullstack-network
+EOF
+echo '✓ Full stack docker-compose.yml created'`
+      },
+      {
+        id: "template-systemd-service",
+        title: "Systemd Service Template",
+        tags: ["template", "systemd", "service"],
+        requires: ["service_name", "exec_start"],
+        command: `sudo bash -c 'cat > /etc/systemd/system/{{service_name}}.service << \"EOF\"
+[Unit]
+Description={{service_name}} Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/{{service_name}}
+ExecStart={{exec_start}}
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{service_name}}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+' && echo '✓ Systemd service created. Enable with: sudo systemctl daemon-reload && sudo systemctl enable {{service_name}} && sudo systemctl start {{service_name}}'`
+      },
+      {
+        id: "template-gitignore-node",
+        title: ".gitignore for Node.js",
+        tags: ["template", "git", "nodejs"],
+        command: `cat > .gitignore << 'EOF'
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+dist/
+build/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Testing
+coverage/
+.nyc_output/
+
+# Misc
+.cache/
+.temp/
+EOF
+echo '✓ .gitignore created for Node.js project'`
+      },
+      {
+        id: "template-env-example",
+        title: ".env.example Template",
+        tags: ["template", "env", "config"],
+        command: `cat > .env.example << 'EOF'
+# Application
+NODE_ENV=production
+PORT=3000
+APP_URL=http://localhost:3000
+
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/dbname
+
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# JWT
+JWT_SECRET=your-secret-key-here
+JWT_EXPIRES_IN=7d
+
+# Email (Optional)
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=noreply@example.com
+
+# AWS (Optional)
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_REGION=us-east-1
+AWS_S3_BUCKET=
+
+# API Keys (Optional)
+API_KEY=
+EOF
+echo '✓ .env.example created'`
+      },
+      {
+        id: "template-readme",
+        title: "README.md Template",
+        tags: ["template", "docs"],
+        command: `cat > README.md << 'EOF'
+# Project Name
+
+Brief description of your project.
+
+## Features
+
+- ✅ Feature 1
+- ✅ Feature 2
+- ✅ Feature 3
+
+## Prerequisites
+
+- Node.js 20+ or Docker
+- PostgreSQL (optional)
+- Redis (optional)
+
+## Installation
+
+\\\`\\\`\\\`bash
+# Clone the repository
+git clone <your-repo-url>
+cd <project-name>
+
+# Install dependencies
+npm install
+
+# Copy environment file
+cp .env.example .env
+
+# Run the application
+npm start
+\\\`\\\`\\\`
+
+## Docker Setup
+
+\\\`\\\`\\\`bash
+docker-compose up -d
+\\\`\\\`\\\`
+
+## Environment Variables
+
+See \`.env.example\` for required environment variables.
+
+## API Documentation
+
+- API endpoint: \`/api\`
+- Health check: \`/health\`
+
+## License
+
+MIT
+EOF
+echo '✓ README.md created'`
+      },
     ],
   },
   {
