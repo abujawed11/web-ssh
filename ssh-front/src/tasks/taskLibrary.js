@@ -14,6 +14,8 @@ import {
   TerminalSquare,
   User,
   Wrench,
+  Gauge,
+  ShieldAlert,
 } from "lucide-react";
 
 export const TASK_GROUPS = [
@@ -73,6 +75,181 @@ export const TASK_GROUPS = [
       { id: "curl-ip", title: "Public IP", tags: ["network", "info"], command: "curl -s ifconfig.me || curl -s https://api.ipify.org || true" },
       { id: "listening", title: "Listening Ports", tags: ["network", "info"], command: "sudo ss -tulpn || sudo netstat -tulpn || true" },
       { id: "firewall", title: "UFW Status", tags: ["security", "firewall"], command: "sudo ufw status verbose || true" },
+    ],
+  },
+  {
+    id: "network-tools",
+    title: "Network Tools",
+    icon: Gauge,
+    description: "Internet speed test, bandwidth monitoring, and firewall management.",
+    tasks: [
+      {
+        id: "speedtest-check",
+        title: "Check Speedtest Availability",
+        tags: ["network", "info", "speed"],
+        command: "echo 'Checking speedtest tools...' && (command -v speedtest-cli && echo '✓ speedtest-cli found' || echo '✗ speedtest-cli not found') && (command -v speedtest && echo '✓ speedtest (Ookla) found' || echo '✗ speedtest (Ookla) not found') && (command -v curl && echo '✓ curl found (can use curl-based tests)' || echo '✗ curl not found')"
+      },
+      {
+        id: "speedtest-install-python",
+        title: "Install Speedtest (Python)",
+        tags: ["network", "install", "speed"],
+        command: "sudo apt-get update && sudo apt-get install -y speedtest-cli"
+      },
+      {
+        id: "speedtest-install-ookla",
+        title: "Install Speedtest (Ookla Official)",
+        tags: ["network", "install", "speed"],
+        command: "curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | sudo bash && sudo apt-get install -y speedtest-cli"
+      },
+      {
+        id: "speedtest",
+        title: "Internet Speed Test",
+        tags: ["network", "speed", "bandwidth"],
+        command: "speedtest-cli || speedtest || echo 'Speedtest not installed. Install it first.'"
+      },
+      {
+        id: "speedtest-simple",
+        title: "Speed Test (Simple)",
+        tags: ["network", "speed"],
+        command: "speedtest-cli --simple 2>/dev/null || speedtest --simple 2>/dev/null || echo 'Speedtest not found'"
+      },
+      {
+        id: "speedtest-bytes",
+        title: "Speed Test (Bytes)",
+        tags: ["network", "speed"],
+        command: "speedtest-cli --bytes 2>/dev/null || echo 'Speedtest not found'"
+      },
+      {
+        id: "speedtest-share",
+        title: "Speed Test (with Share Link)",
+        tags: ["network", "speed"],
+        command: "speedtest-cli --share 2>/dev/null || echo 'Speedtest not found'"
+      },
+      {
+        id: "download-speed-curl",
+        title: "Download Speed (curl 10MB)",
+        tags: ["network", "speed", "download"],
+        command: "echo 'Testing download speed...' && curl -o /dev/null -w 'Speed: %{speed_download} bytes/sec (%.2f MB/s)\\nTime: %{time_total}s\\nSize: %{size_download} bytes\\n' http://speedtest.tele2.net/10MB.zip 2>/dev/null || echo 'Test failed'"
+      },
+      {
+        id: "download-speed-100mb",
+        title: "Download Speed (curl 100MB)",
+        tags: ["network", "speed", "download"],
+        command: "echo 'Testing download speed (100MB)...' && curl -o /dev/null -w 'Speed: %{speed_download} bytes/sec\\nTime: %{time_total}s\\n' http://speedtest.tele2.net/100MB.zip 2>/dev/null || echo 'Test failed'"
+      },
+      {
+        id: "upload-speed-curl",
+        title: "Upload Speed Test",
+        tags: ["network", "speed", "upload"],
+        command: "dd if=/dev/zero bs=1M count=10 2>/dev/null | curl -o /dev/null -w 'Upload Speed: %{speed_upload} bytes/sec\\nTime: %{time_total}s\\n' -T - http://speedtest.tele2.net/upload.php 2>/dev/null || echo 'Test failed'"
+      },
+      {
+        id: "ping-test",
+        title: "Ping Test (Multiple Servers)",
+        tags: ["network", "speed", "latency"],
+        command: "echo '=== Google DNS ===' && ping -c 4 8.8.8.8 | tail -2 && echo '\\n=== Cloudflare ===' && ping -c 4 1.1.1.1 | tail -2"
+      },
+      {
+        id: "bandwidth-monitor",
+        title: "Bandwidth Monitor (5 sec)",
+        tags: ["network", "monitor"],
+        command: "ifstat -i $(ip route | grep default | awk '{print $5}' | head -1) 1 5 2>/dev/null || echo 'ifstat not installed: sudo apt install ifstat'"
+      },
+      {
+        id: "network-usage",
+        title: "Network Usage Stats",
+        tags: ["network", "stats"],
+        command: "cat /proc/net/dev | awk 'NR>2 {print $1, \"RX:\", $2, \"bytes TX:\", $10, \"bytes\"}' | column -t"
+      },
+
+      // Firewall Management
+      {
+        id: "firewall-ufw-status",
+        title: "Firewall: UFW Status (detailed)",
+        tags: ["firewall", "security"],
+        command: "sudo ufw status verbose || echo 'UFW not installed'"
+      },
+      {
+        id: "firewall-ufw-rules",
+        title: "Firewall: List All Rules",
+        tags: ["firewall", "security"],
+        command: "sudo ufw status numbered || echo 'UFW not installed'"
+      },
+      {
+        id: "firewall-enable",
+        title: "Firewall: Enable UFW",
+        tags: ["firewall", "security"],
+        command: "sudo ufw --force enable && sudo ufw status verbose"
+      },
+      {
+        id: "firewall-disable",
+        title: "Firewall: Disable UFW",
+        tags: ["firewall", "security", "danger"],
+        command: "sudo ufw disable && sudo ufw status"
+      },
+      {
+        id: "firewall-allow-ssh",
+        title: "Firewall: Allow SSH (22)",
+        tags: ["firewall", "security", "ssh"],
+        command: "sudo ufw allow 22/tcp && sudo ufw status"
+      },
+      {
+        id: "firewall-allow-http",
+        title: "Firewall: Allow HTTP (80)",
+        tags: ["firewall", "security", "web"],
+        command: "sudo ufw allow 80/tcp && sudo ufw status"
+      },
+      {
+        id: "firewall-allow-https",
+        title: "Firewall: Allow HTTPS (443)",
+        tags: ["firewall", "security", "web"],
+        command: "sudo ufw allow 443/tcp && sudo ufw status"
+      },
+      {
+        id: "firewall-allow-custom",
+        title: "Firewall: Allow Custom Port",
+        tags: ["firewall", "security"],
+        requires: ["port"],
+        command: "sudo ufw allow {{port}}/tcp && sudo ufw status"
+      },
+      {
+        id: "firewall-deny-port",
+        title: "Firewall: Deny Port",
+        tags: ["firewall", "security"],
+        requires: ["port"],
+        command: "sudo ufw deny {{port}} && sudo ufw status"
+      },
+      {
+        id: "firewall-delete-rule",
+        title: "Firewall: Delete Rule by Number",
+        tags: ["firewall", "security"],
+        requires: ["rule_number"],
+        command: "sudo ufw delete {{rule_number}} && sudo ufw status numbered"
+      },
+      {
+        id: "firewall-reset",
+        title: "Firewall: Reset UFW (danger)",
+        tags: ["firewall", "security", "danger"],
+        command: "sudo ufw --force reset && echo 'Firewall reset complete'"
+      },
+      {
+        id: "firewall-default-deny",
+        title: "Firewall: Set Default DENY Incoming",
+        tags: ["firewall", "security"],
+        command: "sudo ufw default deny incoming && sudo ufw default allow outgoing && sudo ufw status"
+      },
+      {
+        id: "firewall-iptables-list",
+        title: "Firewall: IPTables Rules",
+        tags: ["firewall", "security", "iptables"],
+        command: "sudo iptables -L -n -v --line-numbers | head -n 100"
+      },
+      {
+        id: "firewall-connections",
+        title: "Firewall: Active Connections",
+        tags: ["firewall", "network", "security"],
+        command: "sudo ss -tunap | head -n 50 || sudo netstat -tunap | head -n 50"
+      },
     ],
   },
   {
