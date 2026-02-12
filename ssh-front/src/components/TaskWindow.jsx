@@ -217,6 +217,178 @@ export default function TaskWindow({
     });
   }
 
+  // Text input tabs for manual entry
+  if (requiredKeys.includes("username")) {
+    tabs.push({
+      key: "username",
+      label: "Username",
+      isTextInput: true,
+      placeholder: "Enter username (e.g., johndoe)",
+      pattern: "^[a-z_][a-z0-9_-]{0,31}$",
+      patternHint: "lowercase letters, numbers, underscore, hyphen (max 32 chars)",
+      onSelect: (value) => setTargetKey("username", value),
+    });
+  }
+
+  if (requiredKeys.includes("group")) {
+    tabs.push({
+      key: "group",
+      label: "Group",
+      isTextInput: true,
+      placeholder: "Enter group name",
+      pattern: "^[a-z_][a-z0-9_-]{0,31}$",
+      patternHint: "lowercase letters, numbers, underscore, hyphen (max 32 chars)",
+      items: [
+        { name: "sudo", desc: "Administrators with sudo privileges" },
+        { name: "docker", desc: "Docker users" },
+        { name: "www-data", desc: "Web server group" },
+        { name: "staff", desc: "Staff users" },
+      ],
+      onSelect: (value) => setTargetKey("group", value),
+    });
+  }
+
+  if (requiredKeys.includes("shell")) {
+    tabs.push({
+      key: "shell",
+      label: "Shell",
+      isTextInput: true,
+      placeholder: "/bin/bash",
+      items: [
+        { name: "/bin/bash", desc: "Bash shell (default)" },
+        { name: "/bin/sh", desc: "Bourne shell" },
+        { name: "/bin/zsh", desc: "Z shell" },
+        { name: "/usr/bin/fish", desc: "Friendly interactive shell" },
+        { name: "/bin/dash", desc: "Debian Almquist shell" },
+        { name: "/bin/false", desc: "No shell (disable login)" },
+        { name: "/usr/sbin/nologin", desc: "No login shell" },
+      ],
+      onSelect: (value) => setTargetKey("shell", value),
+    });
+  }
+
+  if (requiredKeys.includes("home_dir")) {
+    tabs.push({
+      key: "home_dir",
+      label: "Home Directory",
+      isTextInput: true,
+      placeholder: "/home/username",
+      pattern: "^/.*",
+      patternHint: "must be an absolute path starting with /",
+      onSelect: (value) => setTargetKey("home_dir", value),
+    });
+  }
+
+  if (requiredKeys.includes("port")) {
+    tabs.push({
+      key: "port",
+      label: "Port",
+      isTextInput: true,
+      placeholder: "Enter port number (e.g., 8080)",
+      pattern: "^[0-9]{1,5}$",
+      patternHint: "1-65535",
+      items: [
+        { name: "80", desc: "HTTP" },
+        { name: "443", desc: "HTTPS" },
+        { name: "22", desc: "SSH" },
+        { name: "3000", desc: "Node.js/React dev" },
+        { name: "8080", desc: "Alternative HTTP" },
+        { name: "5432", desc: "PostgreSQL" },
+        { name: "3306", desc: "MySQL" },
+        { name: "6379", desc: "Redis" },
+        { name: "27017", desc: "MongoDB" },
+      ],
+      onSelect: (value) => setTargetKey("port", value),
+    });
+  }
+
+  if (requiredKeys.includes("domain")) {
+    tabs.push({
+      key: "domain",
+      label: "Domain",
+      isTextInput: true,
+      placeholder: "example.com",
+      pattern: "^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$",
+      patternHint: "valid domain name (e.g., example.com, sub.example.com)",
+      onSelect: (value) => setTargetKey("domain", value),
+    });
+  }
+
+  if (requiredKeys.includes("backend_port")) {
+    tabs.push({
+      key: "backend_port",
+      label: "Backend Port",
+      isTextInput: true,
+      placeholder: "3000",
+      pattern: "^[0-9]{1,5}$",
+      patternHint: "1-65535",
+      items: [
+        { name: "3000", desc: "Node.js/Express default" },
+        { name: "8000", desc: "Python/Django default" },
+        { name: "5000", desc: "Flask default" },
+        { name: "4000", desc: "GraphQL common" },
+        { name: "8080", desc: "Alternative HTTP" },
+      ],
+      onSelect: (value) => setTargetKey("backend_port", value),
+    });
+  }
+
+  if (requiredKeys.includes("root_path")) {
+    tabs.push({
+      key: "root_path",
+      label: "Root Path",
+      isTextInput: true,
+      placeholder: "/var/www/html",
+      pattern: "^/.*",
+      patternHint: "must be an absolute path starting with /",
+      items: [
+        { name: "/var/www/html", desc: "Default web root" },
+        { name: "/usr/share/nginx/html", desc: "Nginx default" },
+        { name: "/var/www", desc: "Web directory" },
+      ],
+      onSelect: (value) => setTargetKey("root_path", value),
+    });
+  }
+
+  if (requiredKeys.includes("service_name")) {
+    tabs.push({
+      key: "service_name",
+      label: "Service Name",
+      isTextInput: true,
+      placeholder: "my-app",
+      pattern: "^[a-z][a-z0-9-]*$",
+      patternHint: "lowercase letters, numbers, and hyphens",
+      onSelect: (value) => setTargetKey("service_name", value),
+    });
+  }
+
+  if (requiredKeys.includes("exec_start")) {
+    tabs.push({
+      key: "exec_start",
+      label: "Exec Start Command",
+      isTextInput: true,
+      placeholder: "/usr/bin/node /var/www/app/index.js",
+      items: [
+        { name: "/usr/bin/node /var/www/app/index.js", desc: "Node.js app" },
+        { name: "/usr/bin/python3 /var/www/app/main.py", desc: "Python app" },
+        { name: "/usr/bin/npm start", desc: "npm start" },
+      ],
+      onSelect: (value) => setTargetKey("exec_start", value),
+    });
+  }
+
+  if (requiredKeys.includes("rule_number")) {
+    tabs.push({
+      key: "rule_number",
+      label: "Rule Number",
+      isTextInput: true,
+      placeholder: "1",
+      pattern: "^[0-9]+$",
+      patternHint: "numeric value",
+      onSelect: (value) => setTargetKey("rule_number", value),
+    });
+  }
+
   return (
     <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden flex flex-col h-full min-h-0">
       <div className="p-4 border-b border-slate-700 bg-slate-800/50">

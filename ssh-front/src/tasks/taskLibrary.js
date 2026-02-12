@@ -53,14 +53,318 @@ export const TASK_GROUPS = [
     id: "users-ssh",
     title: "Users & SSH",
     icon: User,
-    description: "User checks and SSH daemon basics.",
+    description: "User management, SSH checks, and system access control.",
     tasks: [
+      // === CURRENT USER INFO ===
       { id: "whoami", title: "Who am I", tags: ["user", "info"], command: "whoami && id" },
       { id: "users", title: "Logged-in Users", tags: ["user", "info"], command: "who || w" },
       { id: "sudo-check", title: "Sudo Privileges", tags: ["user", "security"], command: "sudo -n true && echo 'sudo: yes' || echo 'sudo: no'" },
+
+      // === LIST USERS ===
+      {
+        id: "list-all-users",
+        title: "List All System Users",
+        tags: ["user", "info", "list"],
+        command: "echo 'Username:UID:Home Directory' && cat /etc/passwd | cut -d: -f1,3,6 | column -t -s: | head -n 50"
+      },
+      {
+        id: "list-human-users",
+        title: "List Human Users (UID >= 1000)",
+        tags: ["user", "info", "list"],
+        command: "echo 'Human users with UID >= 1000:' && awk -F: '$3 >= 1000 && $1 != \"nobody\" {print $1 \" (UID:\" $3 \", Home:\" $6 \", Shell:\" $7 \")\"}' /etc/passwd"
+      },
+      {
+        id: "list-users-with-shell",
+        title: "List Users with Login Shell",
+        tags: ["user", "info", "list"],
+        command: "grep -v '/false\\|/nologin' /etc/passwd | cut -d: -f1,3,7 | column -t -s:"
+      },
+      {
+        id: "list-sudo-users",
+        title: "List Users with Sudo Access",
+        tags: ["user", "info", "list", "security"],
+        command: "echo 'Sudo group members:' && getent group sudo || getent group wheel || echo 'No sudo group found'"
+      },
+
+      // === USER INFO ===
+      {
+        id: "user-info",
+        title: "Get User Info",
+        tags: ["user", "info"],
+        requires: ["username"],
+        command: "echo '=== User: {{username}} ===' && id {{username}} 2>/dev/null && echo '' && echo 'Groups:' && groups {{username}} 2>/dev/null && echo '' && echo 'Passwd entry:' && grep '^{{username}}:' /etc/passwd || echo 'User not found'"
+      },
+      {
+        id: "user-groups",
+        title: "Show User Groups",
+        tags: ["user", "info"],
+        requires: ["username"],
+        command: "groups {{username}}"
+      },
+      {
+        id: "user-last-login",
+        title: "Check Last Login",
+        tags: ["user", "info", "security"],
+        requires: ["username"],
+        command: "lastlog -u {{username}} 2>/dev/null || last {{username}} | head -n 10"
+      },
+      {
+        id: "user-processes",
+        title: "Show User Processes",
+        tags: ["user", "process", "info"],
+        requires: ["username"],
+        command: "echo 'Processes owned by {{username}}:' && ps aux | grep '^{{username}} ' | head -n 30 || echo 'No processes found'"
+      },
+      {
+        id: "user-home-size",
+        title: "Check User Home Directory Size",
+        tags: ["user", "disk", "info"],
+        requires: ["username"],
+        command: "sudo du -sh /home/{{username}} 2>/dev/null || echo 'Home directory not found'"
+      },
+      {
+        id: "user-home-files",
+        title: "List User Home Files",
+        tags: ["user", "files", "info"],
+        requires: ["username"],
+        command: "sudo ls -lah /home/{{username}} 2>/dev/null | head -n 50 || echo 'Home directory not found'"
+      },
+
+      // === ADD USER ===
+      {
+        id: "adduser-interactive",
+        title: "Add User (Interactive)",
+        tags: ["user", "create", "admin"],
+        requires: ["username"],
+        command: "sudo adduser {{username}}"
+      },
+      {
+        id: "adduser-quick",
+        title: "Add User (Quick - No Password)",
+        tags: ["user", "create", "admin"],
+        requires: ["username"],
+        command: "sudo adduser --disabled-password --gecos '' {{username}} && echo 'User {{username}} created without password'"
+      },
+      {
+        id: "useradd-system",
+        title: "Add User with Bash Shell",
+        tags: ["user", "create", "admin"],
+        requires: ["username"],
+        command: "sudo useradd -m -s /bin/bash {{username}} && echo 'User {{username}} created. Set password with: sudo passwd {{username}}'"
+      },
+      {
+        id: "adduser-with-sudo",
+        title: "Add User + Sudo Access",
+        tags: ["user", "create", "admin", "sudo"],
+        requires: ["username"],
+        command: "sudo adduser --disabled-password --gecos '' {{username}} && sudo usermod -aG sudo {{username}} && echo 'User {{username}} created with sudo access. Set password with: sudo passwd {{username}}'"
+      },
+
+      // === MODIFY USER ===
+      {
+        id: "usermod-shell",
+        title: "Change User Shell",
+        tags: ["user", "modify", "admin"],
+        requires: ["username", "shell"],
+        command: "sudo usermod -s {{shell}} {{username}} && echo 'Shell changed to {{shell}} for user {{username}}'"
+      },
+      {
+        id: "usermod-add-sudo",
+        title: "Add User to Sudo Group",
+        tags: ["user", "modify", "admin", "sudo"],
+        requires: ["username"],
+        command: "sudo usermod -aG sudo {{username}} && echo 'User {{username}} added to sudo group. Changes take effect on next login.'"
+      },
+      {
+        id: "usermod-add-group",
+        title: "Add User to Group",
+        tags: ["user", "modify", "admin"],
+        requires: ["username", "group"],
+        command: "sudo usermod -aG {{group}} {{username}} && echo 'User {{username}} added to group {{group}}'"
+      },
+      {
+        id: "usermod-remove-group",
+        title: "Remove User from Group",
+        tags: ["user", "modify", "admin"],
+        requires: ["username", "group"],
+        command: "sudo gpasswd -d {{username}} {{group}} && echo 'User {{username}} removed from group {{group}}'"
+      },
+      {
+        id: "usermod-home",
+        title: "Change User Home Directory",
+        tags: ["user", "modify", "admin"],
+        requires: ["username", "home_dir"],
+        command: "sudo usermod -d {{home_dir}} -m {{username}} && echo 'Home directory changed to {{home_dir}} for user {{username}}'"
+      },
+      {
+        id: "usermod-rename",
+        title: "Rename User (Login Name)",
+        tags: ["user", "modify", "admin"],
+        requires: ["username"],
+        command: "echo 'Current username: {{username}}' && echo 'To rename, run: sudo usermod -l NEWNAME {{username}}'"
+      },
+      {
+        id: "usermod-lock",
+        title: "Lock User Account",
+        tags: ["user", "security", "admin"],
+        requires: ["username"],
+        command: "sudo usermod -L {{username}} && echo 'User {{username}} account locked'"
+      },
+      {
+        id: "usermod-unlock",
+        title: "Unlock User Account",
+        tags: ["user", "security", "admin"],
+        requires: ["username"],
+        command: "sudo usermod -U {{username}} && echo 'User {{username}} account unlocked'"
+      },
+      {
+        id: "usermod-disable-login",
+        title: "Disable Login (Set Shell to /bin/false)",
+        tags: ["user", "security", "admin"],
+        requires: ["username"],
+        command: "sudo usermod -s /bin/false {{username}} && echo 'Login disabled for user {{username}}'"
+      },
+
+      // === DELETE USER ===
+      {
+        id: "deluser",
+        title: "Delete User (Keep Home)",
+        tags: ["user", "delete", "admin", "danger"],
+        requires: ["username"],
+        command: "sudo deluser {{username}} && echo 'User {{username}} deleted (home directory preserved)'"
+      },
+      {
+        id: "deluser-remove-home",
+        title: "Delete User + Home Directory",
+        tags: ["user", "delete", "admin", "danger"],
+        requires: ["username"],
+        command: "sudo deluser --remove-home {{username}} && echo 'User {{username}} and home directory deleted'"
+      },
+      {
+        id: "userdel-force",
+        title: "Force Delete User + All Files",
+        tags: ["user", "delete", "admin", "danger"],
+        requires: ["username"],
+        command: "sudo userdel -r -f {{username}} 2>/dev/null && echo 'User {{username}} forcefully deleted with all files' || echo 'Delete failed or user not found'"
+      },
+      {
+        id: "kill-user-processes",
+        title: "Kill All User Processes",
+        tags: ["user", "process", "admin", "danger"],
+        requires: ["username"],
+        command: "sudo pkill -u {{username}} && echo 'All processes for user {{username}} terminated' || echo 'No processes found or kill failed'"
+      },
+
+      // === PASSWORD MANAGEMENT ===
+      {
+        id: "passwd-set",
+        title: "Set User Password (Interactive)",
+        tags: ["user", "password", "admin"],
+        requires: ["username"],
+        command: "sudo passwd {{username}}"
+      },
+      {
+        id: "passwd-expire",
+        title: "Force Password Change on Login",
+        tags: ["user", "password", "admin"],
+        requires: ["username"],
+        command: "sudo passwd -e {{username}} && echo 'User {{username}} will be prompted to change password on next login'"
+      },
+      {
+        id: "passwd-delete",
+        title: "Remove User Password (Danger)",
+        tags: ["user", "password", "admin", "danger"],
+        requires: ["username"],
+        command: "sudo passwd -d {{username}} && echo 'Password removed for user {{username}}'"
+      },
+      {
+        id: "passwd-status",
+        title: "Check Password Status",
+        tags: ["user", "password", "info"],
+        requires: ["username"],
+        command: "sudo passwd -S {{username}}"
+      },
+      {
+        id: "chage-info",
+        title: "Show Password Expiry Info",
+        tags: ["user", "password", "info"],
+        requires: ["username"],
+        command: "sudo chage -l {{username}}"
+      },
+      {
+        id: "chage-max-days",
+        title: "Set Password Max Age (90 days)",
+        tags: ["user", "password", "admin"],
+        requires: ["username"],
+        command: "sudo chage -M 90 {{username}} && echo 'Password max age set to 90 days for user {{username}}'"
+      },
+
+      // === GROUP MANAGEMENT ===
+      {
+        id: "list-groups",
+        title: "List All Groups",
+        tags: ["user", "group", "info"],
+        command: "echo 'Group:GID' && cat /etc/group | cut -d: -f1,3 | column -t -s: | head -n 50"
+      },
+      {
+        id: "group-members",
+        title: "Show Group Members",
+        tags: ["user", "group", "info"],
+        requires: ["group"],
+        command: "echo 'Members of group {{group}}:' && getent group {{group}} || echo 'Group not found'"
+      },
+      {
+        id: "create-group",
+        title: "Create New Group",
+        tags: ["user", "group", "admin"],
+        requires: ["group"],
+        command: "sudo groupadd {{group}} && echo 'Group {{group}} created'"
+      },
+      {
+        id: "delete-group",
+        title: "Delete Group",
+        tags: ["user", "group", "admin", "danger"],
+        requires: ["group"],
+        command: "sudo groupdel {{group}} && echo 'Group {{group}} deleted'"
+      },
+      {
+        id: "list-user-groups-detail",
+        title: "List All Groups for User",
+        tags: ["user", "group", "info"],
+        requires: ["username"],
+        command: "id {{username}} && echo '' && echo 'Detailed group list:' && groups {{username}}"
+      },
+
+      // === SSH MANAGEMENT ===
       { id: "ssh-status", title: "SSH Service Status", tags: ["ssh", "service"], command: "sudo systemctl status ssh --no-pager || sudo service ssh status || true" },
       { id: "ssh-config", title: "Show sshd_config (key lines)", tags: ["ssh", "config"], command: "sudo grep -E '^(Port|PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|AllowUsers|AllowGroups)' /etc/ssh/sshd_config || true" },
       { id: "auth-log", title: "Auth Log (tail)", tags: ["ssh", "logs"], command: "sudo tail -n 80 /var/log/auth.log 2>/dev/null || sudo journalctl -u ssh -n 80 --no-pager || true" },
+      {
+        id: "ssh-list-keys",
+        title: "List User SSH Keys",
+        tags: ["ssh", "keys", "info"],
+        requires: ["username"],
+        command: "sudo ls -lah /home/{{username}}/.ssh/ 2>/dev/null || echo 'No .ssh directory found'"
+      },
+      {
+        id: "ssh-view-authorized-keys",
+        title: "View User Authorized Keys",
+        tags: ["ssh", "keys", "info"],
+        requires: ["username"],
+        command: "sudo cat /home/{{username}}/.ssh/authorized_keys 2>/dev/null || echo 'No authorized_keys file found'"
+      },
+      {
+        id: "ssh-active-sessions",
+        title: "Show Active SSH Sessions",
+        tags: ["ssh", "info", "security"],
+        command: "who | grep pts && echo '' && ss -tnp | grep :22 || netstat -tnp | grep :22"
+      },
+      {
+        id: "ssh-failed-logins",
+        title: "Show Failed SSH Login Attempts",
+        tags: ["ssh", "security", "logs"],
+        command: "sudo grep 'Failed password' /var/log/auth.log 2>/dev/null | tail -n 50 || sudo journalctl | grep 'Failed password' | tail -n 50"
+      },
     ],
   },
   {
